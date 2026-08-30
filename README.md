@@ -4,3 +4,7 @@
 - Branch flow: `feature/* → main` (see job-platform-docs/.github/git-strategy.md)
 - Jira PBL6 skid.atlassian.net, Master plan docs/master-plan.md
 - TM: TM1 Hoai, TM2 Thanh, TM3 Chi Bao, TM4 Khoa
+
+## Deploy (Render Free jp-app — TM4 Khoa)
+- Service: `jp-app` `https://jp-app.onrender.com` `5004`
+- Hook: `RENDER_DEPLOY_HOOK_APP`
