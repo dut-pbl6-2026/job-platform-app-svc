@@ -15,7 +15,8 @@ public record ApplicationDetailDto(
     double? Score,
     DateTime CreatedAt,
     DateTime UpdatedAt,
-    IReadOnlyList<StatusHistoryDto> StatusHistory
+    IReadOnlyList<StatusHistoryDto> StatusHistory,
+    IReadOnlyList<string>? NextAllowedStatuses = null
 );
 
 public record ApplicationSummaryDto(
@@ -39,7 +40,15 @@ public record StatusHistoryDto(
 
 public record UpdateStatusRequest(
     string Status,
-    string? Note
+    string? Note = null,
+    string? RecruiterNotes = null,
+    double? Score = null
+);
+
+public record StatusFlowDto(
+    IReadOnlyList<string> AllStatuses,
+    IReadOnlyList<string> TerminalStatuses,
+    IReadOnlyDictionary<string, IReadOnlyList<string>> Transitions
 );
 
 public record PaginatedResponse<T>(

@@ -15,9 +15,12 @@ Dependency: `Api -> Infrastructure -> Core -> SharedKernel` (`PackageReference J
 ## SRS Mapping (APP-01)
 - `POST /api/applications` - Candidate applies with CV upload (multipart/form-data: job_id, cover_letter, cv_file). Prevents duplicate application per (job_id, applicant_id) -> 409 Conflict.
 - `GET /api/applications/me` - Candidate views their application history (paginated, filterable by status).
-- `GET /api/applications/{id}` - View application details and complete status transition audit history.
+- `GET /api/applications/status-flow` - System-wide status flow state machine metadata and transition map.
+- `GET /api/applications/{id}` - View application details, complete status transition audit history, and next allowed transitions.
+- `GET /api/applications/{id}/history` - Candidate/Recruiter views chronological status transition audit trail.
+- `GET /api/applications/{id}/allowed-transitions` - Query valid next status transitions for a specific application.
 - `GET /api/applications/job/{jobId}` - Recruiter views applications submitted for their job.
-- `PUT /api/applications/{id}/status` - Recruiter updates application status (pending, reviewed, shortlisted, accepted, rejected) and appends to status_history.
+- `PUT /api/applications/{id}/status` - Recruiter updates application status following the status flow state machine (`pending -> reviewed -> shortlisted -> accepted`, with `rejected` at any non-terminal stage, terminal states: `accepted`, `rejected`), optionally updating notes & score, and appends to status_history.
 - `GET /api/applications/cv/{fileName}` - Secure file download/streaming for CV files.
 - `GET /health` - Service healthcheck returning `{"status":"ok","service":"application"}`.
 
