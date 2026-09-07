@@ -40,10 +40,40 @@ public class Application : Entity
         StatusHistories.Add(new StatusHistory(Id, ApplicationStatus.Pending, applicantId, "Application submitted"));
     }
 
+    public static readonly IReadOnlyDictionary<ApplicationStatus, IReadOnlyList<ApplicationStatus>> AllowedTransitions =
+        new Dictionary<ApplicationStatus, IReadOnlyList<ApplicationStatus>>
+        {
+            [ApplicationStatus.Pending] = new[] { ApplicationStatus.Reviewed, ApplicationStatus.Shortlisted, ApplicationStatus.Rejected },
+            [ApplicationStatus.Reviewed] = new[] { ApplicationStatus.Shortlisted, ApplicationStatus.Rejected },
+            [ApplicationStatus.Shortlisted] = new[] { ApplicationStatus.Accepted, ApplicationStatus.Rejected },
+            [ApplicationStatus.Accepted] = Array.Empty<ApplicationStatus>(),
+            [ApplicationStatus.Rejected] = Array.Empty<ApplicationStatus>()
+        };
+
+    public bool CanTransitionTo(ApplicationStatus newStatus)
+    {
+        return AllowedTransitions.TryGetValue(Status, out var allowed) && allowed.Contains(newStatus);
+    }
+
+    public IReadOnlyList<ApplicationStatus> GetAllowedTransitions()
+    {
+        return AllowedTransitions.TryGetValue(Status, out var allowed) ? allowed : Array.Empty<ApplicationStatus>();
+    }
+
     public StatusHistory UpdateStatus(ApplicationStatus newStatus, Guid changedBy, string? note = null)
     {
         if (changedBy == Guid.Empty)
             throw new ArgumentException("ChangedBy user id is required.", nameof(changedBy));
+
+        if (Status == newStatus)
+            throw new InvalidOperationException($"Application is already in '{Status}' status.");
+
+        if (!CanTransitionTo(newStatus))
+        {
+            var allowed = string.Join(", ", GetAllowedTransitions());
+            throw new InvalidOperationException(
+                $"Invalid status transition from '{Status}' to '{newStatus}'. Allowed transitions: {(string.IsNullOrEmpty(allowed) ? "None (terminal state)" : allowed)}.");
+        }
 
         Status = newStatus;
         Touch();

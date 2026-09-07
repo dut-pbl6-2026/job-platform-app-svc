@@ -20,13 +20,22 @@ public static class ApplicationEndpoints
         // APP-01-03: View candidate application history
         group.MapGet("/me", GetMyApplications);
 
+        // System-wide status flow state machine metadata
+        group.MapGet("/status-flow", GetStatusFlowDefinition);
+
         // APP-01-04: View application details
         group.MapGet("/{id:guid}", GetApplicationById);
+
+        // Application status transition audit history
+        group.MapGet("/{id:guid}/history", GetApplicationHistory);
+
+        // Allowed next status transitions for this application
+        group.MapGet("/{id:guid}/allowed-transitions", GetAllowedTransitionsForApplication);
 
         // APP-01-05: View applications for a specific job (Recruiter)
         group.MapGet("/job/{jobId:guid}", GetApplicationsByJobId);
 
-        // APP-01-06: Update application status
+        // APP-01-06: Update application status (pending -> reviewed -> ...)
         group.MapPut("/{id:guid}/status", UpdateApplicationStatus);
 
         // CV file streaming / download
@@ -126,7 +135,19 @@ public static class ApplicationEndpoints
 
         var application = new Application(jobId, userId.Value, cvUrl, coverLetter);
         db.Applications.Add(application);
-        await db.SaveChangesAsync();
+
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateException)
+        {
+            return Results.Conflict(new
+            {
+                status = 409,
+                message = "Bạn đã ứng tuyển vào công việc này trước đó (409 Conflict)."
+            });
+        }
 
         return Results.Created($"/api/applications/{application.Id}", new
         {
@@ -159,9 +180,19 @@ public static class ApplicationEndpoints
 
         var query = db.Applications.AsNoTracking().Where(a => a.ApplicantId == userId.Value);
 
-        if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<ApplicationStatus>(status, true, out var parsedStatus))
+        if (!string.IsNullOrWhiteSpace(status))
         {
-            query = query.Where(a => a.Status == parsedStatus);
+            if (Enum.TryParse<ApplicationStatus>(status, true, out var parsedStatus))
+            {
+                query = query.Where(a => a.Status == parsedStatus);
+            }
+            else
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["status"] = [$"Invalid status '{status}'. Allowed values: pending, reviewed, shortlisted, accepted, rejected."]
+                });
+            }
         }
 
         var total = await query.CountAsync();
@@ -185,7 +216,7 @@ public static class ApplicationEndpoints
 
     /// <summary>
     /// GET /api/applications/{id}
-    /// Returns application details including complete status history.
+    /// Returns application details including complete status history and permitted next transitions.
     /// </summary>
     public static async Task<IResult> GetApplicationById(
         Guid id,
@@ -222,6 +253,10 @@ public static class ApplicationEndpoints
                 h.ChangedAt))
             .ToList();
 
+        var nextAllowed = app.GetAllowedTransitions()
+            .Select(s => s.ToString().ToLowerInvariant())
+            .ToList();
+
         var detail = new ApplicationDetailDto(
             app.Id,
             app.JobId,
@@ -233,9 +268,110 @@ public static class ApplicationEndpoints
             app.Score,
             app.CreatedAt,
             app.UpdatedAt,
-            historyDtos);
+            historyDtos,
+            nextAllowed);
 
         return Results.Ok(detail);
+    }
+
+    /// <summary>
+    /// GET /api/applications/{id}/history
+    /// Retrieves chronological status transition history audit trail for an application.
+    /// Accessible by the applicant who submitted it or recruiters/admins.
+    /// </summary>
+    public static async Task<IResult> GetApplicationHistory(
+        Guid id,
+        AppDbContext db,
+        HttpContext ctx)
+    {
+        var (userId, role) = GetIdentity(ctx);
+        if (userId is null)
+            return UnauthorizedResult();
+
+        var app = await db.Applications
+            .Include(a => a.StatusHistories)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(a => a.Id == id);
+
+        if (app is null)
+            return Results.NotFound(new { message = "Application not found." });
+
+        var isOwner = app.ApplicantId == userId.Value;
+        var isRecruiterOrAdmin = role.Equals("Recruiter", StringComparison.OrdinalIgnoreCase) ||
+                                 role.Equals("Admin", StringComparison.OrdinalIgnoreCase);
+
+        if (!isOwner && !isRecruiterOrAdmin)
+            return ForbiddenResult("You are not authorized to view the history for this application.");
+
+        var history = app.StatusHistories
+            .OrderBy(h => h.ChangedAt)
+            .Select(h => new StatusHistoryDto(
+                h.Id,
+                h.Status.ToString().ToLowerInvariant(),
+                h.Note,
+                h.ChangedBy,
+                h.ChangedAt))
+            .ToList();
+
+        return Results.Ok(history);
+    }
+
+    /// <summary>
+    /// GET /api/applications/{id}/allowed-transitions
+    /// Returns the next permitted status transitions for a specific application.
+    /// Useful for frontends (React / Flutter) to dynamically render recruiter action buttons.
+    /// </summary>
+    public static async Task<IResult> GetAllowedTransitionsForApplication(
+        Guid id,
+        AppDbContext db,
+        HttpContext ctx)
+    {
+        var (userId, role) = GetIdentity(ctx);
+        if (userId is null)
+            return UnauthorizedResult();
+
+        var app = await db.Applications.AsNoTracking().FirstOrDefaultAsync(a => a.Id == id);
+        if (app is null)
+            return Results.NotFound(new { message = "Application not found." });
+
+        var isOwner = app.ApplicantId == userId.Value;
+        var isRecruiterOrAdmin = role.Equals("Recruiter", StringComparison.OrdinalIgnoreCase) ||
+                                 role.Equals("Admin", StringComparison.OrdinalIgnoreCase);
+
+        if (!isOwner && !isRecruiterOrAdmin)
+            return ForbiddenResult("You are not authorized to view transition rules for this application.");
+
+        return Results.Ok(new
+        {
+            id = app.Id,
+            current_status = app.Status.ToString().ToLowerInvariant(),
+            allowed_transitions = app.GetAllowedTransitions().Select(s => s.ToString().ToLowerInvariant()).ToList()
+        });
+    }
+
+    /// <summary>
+    /// GET /api/applications/status-flow
+    /// Returns the entire system state transition diagram and available statuses.
+    /// </summary>
+    public static IResult GetStatusFlowDefinition()
+    {
+        var allStatuses = Enum.GetNames<ApplicationStatus>()
+            .Select(s => s.ToLowerInvariant())
+            .ToList();
+
+        var terminalStatuses = new[]
+        {
+            ApplicationStatus.Accepted.ToString().ToLowerInvariant(),
+            ApplicationStatus.Rejected.ToString().ToLowerInvariant()
+        };
+
+        var transitions = Application.AllowedTransitions
+            .ToDictionary(
+                kvp => kvp.Key.ToString().ToLowerInvariant(),
+                kvp => (IReadOnlyList<string>)kvp.Value.Select(s => s.ToString().ToLowerInvariant()).ToList()
+            );
+
+        return Results.Ok(new StatusFlowDto(allStatuses, terminalStatuses, transitions));
     }
 
     /// <summary>
@@ -265,9 +401,19 @@ public static class ApplicationEndpoints
 
         var query = db.Applications.AsNoTracking().Where(a => a.JobId == jobId);
 
-        if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<ApplicationStatus>(status, true, out var parsedStatus))
+        if (!string.IsNullOrWhiteSpace(status))
         {
-            query = query.Where(a => a.Status == parsedStatus);
+            if (Enum.TryParse<ApplicationStatus>(status, true, out var parsedStatus))
+            {
+                query = query.Where(a => a.Status == parsedStatus);
+            }
+            else
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["status"] = [$"Invalid status '{status}'. Allowed values: pending, reviewed, shortlisted, accepted, rejected."]
+                });
+            }
         }
 
         var total = await query.CountAsync();
@@ -291,7 +437,8 @@ public static class ApplicationEndpoints
 
     /// <summary>
     /// PUT /api/applications/{id}/status
-    /// Updates status of an application and appends a transition record to status_history.
+    /// Updates status of an application adhering to the status flow state machine.
+    /// Appends an audit transition record to status_history.
     /// </summary>
     public static async Task<IResult> UpdateApplicationStatus(
         Guid id,
@@ -324,14 +471,43 @@ public static class ApplicationEndpoints
         if (application is null)
             return Results.NotFound(new { message = "Application not found." });
 
-        var history = application.UpdateStatus(newStatus, userId.Value, req.Note);
-        db.StatusHistories.Add(history);
+        var previousStatus = application.Status;
+
+        try
+        {
+            var history = application.UpdateStatus(newStatus, userId.Value, req.Note);
+            db.StatusHistories.Add(history);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Conflict(new
+            {
+                status = 409,
+                message = ex.Message,
+                current_status = application.Status.ToString().ToLowerInvariant(),
+                allowed_transitions = application.GetAllowedTransitions().Select(s => s.ToString().ToLowerInvariant()).ToList()
+            });
+        }
+
+        if (req.RecruiterNotes is not null)
+        {
+            application.SetRecruiterNotes(req.RecruiterNotes);
+        }
+
+        if (req.Score.HasValue)
+        {
+            application.SetScore(req.Score.Value);
+        }
+
         await db.SaveChangesAsync();
 
         return Results.Ok(new
         {
+            id = application.Id,
             message = "Trạng thái ứng tuyển đã được cập nhật thành công.",
-            status = application.Status.ToString().ToLowerInvariant()
+            previous_status = previousStatus.ToString().ToLowerInvariant(),
+            status = application.Status.ToString().ToLowerInvariant(),
+            next_allowed_statuses = application.GetAllowedTransitions().Select(s => s.ToString().ToLowerInvariant()).ToList()
         });
     }
 

@@ -225,7 +225,7 @@ public class ApplicationEndpointsTests : IDisposable
         await _db.SaveChangesAsync();
 
         var recruiterCtx = BuildContext(_recruiterId, "Recruiter");
-        var updateReq = new UpdateStatusRequest("shortlisted", "Passed screening interview");
+        var updateReq = new UpdateStatusRequest("reviewed", "Passed initial CV screening");
 
         var result = await ApplicationEndpoints.UpdateApplicationStatus(app.Id, updateReq, _db, recruiterCtx);
 
@@ -235,9 +235,156 @@ public class ApplicationEndpointsTests : IDisposable
 
         // Verify DB
         var updated = await _db.Applications.Include(a => a.StatusHistories).FirstAsync(a => a.Id == app.Id);
-        Assert.Equal(ApplicationStatus.Shortlisted, updated.Status);
+        Assert.Equal(ApplicationStatus.Reviewed, updated.Status);
         Assert.Equal(2, updated.StatusHistories.Count);
-        Assert.Equal(ApplicationStatus.Shortlisted, updated.StatusHistories.Last().Status);
-        Assert.Equal("Passed screening interview", updated.StatusHistories.Last().Note);
+        Assert.Equal(ApplicationStatus.Reviewed, updated.StatusHistories.Last().Status);
+        Assert.Equal("Passed initial CV screening", updated.StatusHistories.Last().Note);
+    }
+
+    [Fact]
+    public async Task UpdateApplicationStatus_FullPipeline_ProgressesThroughAllStages()
+    {
+        var app = new Application(_jobId, _applicantId, "/cv.pdf");
+        _db.Applications.Add(app);
+        await _db.SaveChangesAsync();
+
+        var recruiterCtx = BuildContext(_recruiterId, "Recruiter");
+
+        // 1. Pending -> Reviewed
+        var res1 = await ApplicationEndpoints.UpdateApplicationStatus(
+            app.Id, new UpdateStatusRequest("reviewed", "CV looks good"), _db, recruiterCtx);
+        Assert.Equal(200, (res1 as IStatusCodeHttpResult)?.StatusCode);
+
+        // 2. Reviewed -> Shortlisted
+        var res2 = await ApplicationEndpoints.UpdateApplicationStatus(
+            app.Id, new UpdateStatusRequest("shortlisted", "Invite to technical round"), _db, recruiterCtx);
+        Assert.Equal(200, (res2 as IStatusCodeHttpResult)?.StatusCode);
+
+        // 3. Shortlisted -> Accepted (with score & notes)
+        var res3 = await ApplicationEndpoints.UpdateApplicationStatus(
+            app.Id,
+            new UpdateStatusRequest("accepted", "Offer accepted by candidate", "Hired as Mid-level Dev", 92.5),
+            _db,
+            recruiterCtx);
+        Assert.Equal(200, (res3 as IStatusCodeHttpResult)?.StatusCode);
+
+        // Verify final state
+        var finalApp = await _db.Applications.Include(a => a.StatusHistories).FirstAsync(a => a.Id == app.Id);
+        Assert.Equal(ApplicationStatus.Accepted, finalApp.Status);
+        Assert.Equal(92.5, finalApp.Score);
+        Assert.Equal("Hired as Mid-level Dev", finalApp.RecruiterNotes);
+        Assert.Equal(4, finalApp.StatusHistories.Count);
+    }
+
+    [Fact]
+    public async Task UpdateApplicationStatus_InvalidTransition_Returns409Conflict()
+    {
+        var app = new Application(_jobId, _applicantId, "/cv.pdf");
+        _db.Applications.Add(app);
+        await _db.SaveChangesAsync();
+
+        var recruiterCtx = BuildContext(_recruiterId, "Recruiter");
+
+        // Pending -> Accepted is illegal (must go through review/shortlist)
+        var updateReq = new UpdateStatusRequest("accepted", "Cannot jump directly");
+        var result = await ApplicationEndpoints.UpdateApplicationStatus(app.Id, updateReq, _db, recruiterCtx);
+
+        var statusCodeResult = result as IStatusCodeHttpResult;
+        Assert.NotNull(statusCodeResult);
+        Assert.Equal(409, statusCodeResult.StatusCode);
+    }
+
+    [Fact]
+    public async Task UpdateApplicationStatus_TerminalState_Returns409Conflict()
+    {
+        var app = new Application(_jobId, _applicantId, "/cv.pdf");
+        _db.Applications.Add(app);
+        await _db.SaveChangesAsync();
+
+        var recruiterCtx = BuildContext(_recruiterId, "Recruiter");
+
+        // Reject application
+        await ApplicationEndpoints.UpdateApplicationStatus(app.Id, new UpdateStatusRequest("rejected", "Not qualified"), _db, recruiterCtx);
+
+        // Attempt to move from Rejected to Reviewed
+        var retryResult = await ApplicationEndpoints.UpdateApplicationStatus(app.Id, new UpdateStatusRequest("reviewed"), _db, recruiterCtx);
+        Assert.Equal(409, (retryResult as IStatusCodeHttpResult)?.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetApplicationHistory_OwnerCandidateAndRecruiter_CanRetrieveAuditTrail()
+    {
+        var app = new Application(_jobId, _applicantId, "/cv.pdf");
+        _db.Applications.Add(app);
+        await _db.SaveChangesAsync();
+
+        var recruiterCtx = BuildContext(_recruiterId, "Recruiter");
+        await ApplicationEndpoints.UpdateApplicationStatus(
+            app.Id, new UpdateStatusRequest("reviewed", "Review completed"), _db, recruiterCtx);
+        await ApplicationEndpoints.UpdateApplicationStatus(
+            app.Id, new UpdateStatusRequest("shortlisted", "Shortlisted for interview"), _db, recruiterCtx);
+
+        // 1. Candidate views own application history
+        var applicantCtx = BuildContext(_applicantId, "User");
+        var candidateResult = await ApplicationEndpoints.GetApplicationHistory(app.Id, _db, applicantCtx);
+        Assert.Equal(200, (candidateResult as IStatusCodeHttpResult)?.StatusCode);
+
+        var history = (candidateResult as IValueHttpResult)?.Value as IReadOnlyList<StatusHistoryDto>;
+        Assert.NotNull(history);
+        Assert.Equal(3, history.Count);
+        Assert.Equal("pending", history[0].Status);
+        Assert.Equal("reviewed", history[1].Status);
+        Assert.Equal("shortlisted", history[2].Status);
+
+        // 2. Recruiter views history
+        var recruiterResult = await ApplicationEndpoints.GetApplicationHistory(app.Id, _db, recruiterCtx);
+        Assert.Equal(200, (recruiterResult as IStatusCodeHttpResult)?.StatusCode);
+
+        // 3. Unauthorized other candidate receives 403 Forbidden
+        var otherUserCtx = BuildContext(_otherUserId, "User");
+        var forbiddenResult = await ApplicationEndpoints.GetApplicationHistory(app.Id, _db, otherUserCtx);
+        Assert.Equal(403, (forbiddenResult as IStatusCodeHttpResult)?.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetAllowedTransitionsForApplication_ReturnsPermittedNextStatuses()
+    {
+        var app = new Application(_jobId, _applicantId, "/cv.pdf");
+        _db.Applications.Add(app);
+        await _db.SaveChangesAsync();
+
+        var recruiterCtx = BuildContext(_recruiterId, "Recruiter");
+        var result = await ApplicationEndpoints.GetAllowedTransitionsForApplication(app.Id, _db, recruiterCtx);
+
+        Assert.Equal(200, (result as IStatusCodeHttpResult)?.StatusCode);
+    }
+
+    [Fact]
+    public void GetStatusFlowDefinition_ReturnsCompleteStateMachine()
+    {
+        var result = ApplicationEndpoints.GetStatusFlowDefinition();
+
+        var statusCodeResult = result as IStatusCodeHttpResult;
+        Assert.NotNull(statusCodeResult);
+        Assert.Equal(200, statusCodeResult.StatusCode);
+
+        var flow = (result as IValueHttpResult)?.Value as StatusFlowDto;
+        Assert.NotNull(flow);
+        Assert.Contains("pending", flow.AllStatuses);
+        Assert.Contains("accepted", flow.TerminalStatuses);
+        Assert.Contains("rejected", flow.TerminalStatuses);
+        Assert.True(flow.Transitions.ContainsKey("pending"));
+        Assert.True(flow.Transitions.ContainsKey("shortlisted"));
+    }
+
+    [Fact]
+    public async Task GetMyApplications_WithInvalidStatus_ReturnsValidationProblem()
+    {
+        var ctx = BuildContext(_applicantId, "User");
+        var result = await ApplicationEndpoints.GetMyApplications("non_existent_status", 1, 10, _db, ctx);
+
+        var statusCodeResult = result as IStatusCodeHttpResult;
+        Assert.NotNull(statusCodeResult);
+        Assert.Equal(400, statusCodeResult.StatusCode);
     }
 }
