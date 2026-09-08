@@ -386,7 +386,6 @@ public class ApplicationEndpointsTests : IDisposable
         var statusCodeResult = result as IStatusCodeHttpResult;
         Assert.NotNull(statusCodeResult);
         Assert.Equal(400, statusCodeResult.StatusCode);
-<<<<<<< HEAD
     }
 
     [Fact]
@@ -758,7 +757,5 @@ public class ApplicationEndpointsTests : IDisposable
         {
             throw new DbUpdateException("Duplicate key violation on IX_applications_job_applicant_unique", new Exception());
         }
-=======
->>>>>>> 51cf00ad85077f8148705bed9cb84ef939879c08
     }
 }

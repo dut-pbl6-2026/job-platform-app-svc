@@ -183,7 +183,6 @@ public class ApplicationEntityTests
         Assert.Throws<InvalidOperationException>(() =>
             rejectedApp.UpdateStatus(ApplicationStatus.Reviewed, recruiterId));
     }
-<<<<<<< HEAD
 
     [Fact]
     public void StatusFlow_PendingCannotSkipToShortlisted()
@@ -236,6 +235,4 @@ public class ApplicationEntityTests
         app.SetScore(null);
         Assert.Null(app.Score);
     }
-=======
->>>>>>> 51cf00ad85077f8148705bed9cb84ef939879c08
 }
