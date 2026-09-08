@@ -1,2 +1,26 @@
 [tools]
 dotnet = "10.0.100"
+
+[tasks.build]
+description = "Build solution"
+run = "dotnet build AppService.sln --warnaserror"
+
+[tasks.test]
+description = "Run tests"
+run = "dotnet test AppService.sln"
+
+[tasks.format]
+description = "Check formatting"
+run = "dotnet format --verify-no-changes AppService.sln"
+
+[tasks.ef-check]
+description = "Check EF migrations"
+run = "dotnet ef migrations has-pending-model-changes --project src/App.Infrastructure/App.Infrastructure.csproj --startup-project src/App.Api/App.Api.csproj"
+
+[tasks.run]
+description = "Run API"
+run = "dotnet run --project src/App.Api"
+
+[tasks.sync-env]
+description = "Sync env from infra"
+run = "../job-platform-infra/scripts/sync-env.sh dev"
