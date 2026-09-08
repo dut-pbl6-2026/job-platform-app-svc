@@ -82,7 +82,7 @@ public class ApplicationEndpointsTests : IDisposable
             formFields[kvp.Key] = kvp.Value;
         }
 
-        var bytes = fileBytes ?? Encoding.UTF8.GetBytes("Dummy PDF content");
+        var bytes = fileBytes ?? Encoding.UTF8.GetBytes("%PDF-1.4 Dummy PDF content");
         var fileStream = new MemoryStream(bytes);
         var formFile = new FormFile(fileStream, 0, bytes.Length, "cv_file", fileName)
         {
@@ -386,5 +386,276 @@ public class ApplicationEndpointsTests : IDisposable
         var statusCodeResult = result as IStatusCodeHttpResult;
         Assert.NotNull(statusCodeResult);
         Assert.Equal(400, statusCodeResult.StatusCode);
+    }
+
+    [Fact]
+    public async Task DownloadCv_OwnerApplicant_ReturnsFile()
+    {
+        var pdfBytes = "%PDF-1.4 Content of CV"u8.ToArray();
+        using var stream = new MemoryStream(pdfBytes);
+        var cvUrl = await _storage.SaveCvAsync(stream, "my_cv.pdf", "application/pdf");
+        var fileName = Path.GetFileName(cvUrl);
+
+        var app = new Application(_jobId, _applicantId, cvUrl);
+        _db.Applications.Add(app);
+        await _db.SaveChangesAsync();
+
+        var ctx = BuildContext(_applicantId, "User");
+        var result = await ApplicationEndpoints.DownloadCv(fileName, _db, _storage, ctx);
+
+        Assert.NotNull(result);
+        Assert.IsAssignableFrom<IContentTypeHttpResult>(result);
+    }
+
+    [Fact]
+    public async Task DownloadCv_Recruiter_ReturnsFile()
+    {
+        var pdfBytes = "%PDF-1.4 Content of CV"u8.ToArray();
+        using var stream = new MemoryStream(pdfBytes);
+        var cvUrl = await _storage.SaveCvAsync(stream, "my_cv.pdf", "application/pdf");
+        var fileName = Path.GetFileName(cvUrl);
+
+        var app = new Application(_jobId, _applicantId, cvUrl);
+        _db.Applications.Add(app);
+        await _db.SaveChangesAsync();
+
+        var ctx = BuildContext(_recruiterId, "Recruiter");
+        var result = await ApplicationEndpoints.DownloadCv(fileName, _db, _storage, ctx);
+
+        Assert.NotNull(result);
+        Assert.IsAssignableFrom<IContentTypeHttpResult>(result);
+    }
+
+    [Fact]
+    public async Task DownloadCv_OtherUser_Returns403Forbidden()
+    {
+        var pdfBytes = "%PDF-1.4 Content of CV"u8.ToArray();
+        using var stream = new MemoryStream(pdfBytes);
+        var cvUrl = await _storage.SaveCvAsync(stream, "my_cv.pdf", "application/pdf");
+        var fileName = Path.GetFileName(cvUrl);
+
+        var app = new Application(_jobId, _applicantId, cvUrl);
+        _db.Applications.Add(app);
+        await _db.SaveChangesAsync();
+
+        var ctx = BuildContext(_otherUserId, "User");
+        var result = await ApplicationEndpoints.DownloadCv(fileName, _db, _storage, ctx);
+
+        var statusCodeResult = result as IStatusCodeHttpResult;
+        Assert.NotNull(statusCodeResult);
+        Assert.Equal(403, statusCodeResult.StatusCode);
+    }
+
+    [Fact]
+    public async Task DownloadCv_Unauthenticated_Returns401Unauthorized()
+    {
+        var ctx = BuildContext(null);
+        var result = await ApplicationEndpoints.DownloadCv("some_cv.pdf", _db, _storage, ctx);
+
+        var statusCodeResult = result as IStatusCodeHttpResult;
+        Assert.NotNull(statusCodeResult);
+        Assert.Equal(401, statusCodeResult.StatusCode);
+    }
+
+    [Fact]
+    public async Task DownloadCv_NonExistentCv_Returns404NotFound()
+    {
+        var ctx = BuildContext(_applicantId, "User");
+        var result = await ApplicationEndpoints.DownloadCv("nonexistent.pdf", _db, _storage, ctx);
+
+        var statusCodeResult = result as IStatusCodeHttpResult;
+        Assert.NotNull(statusCodeResult);
+        Assert.Equal(404, statusCodeResult.StatusCode);
+    }
+
+    [Fact]
+    public async Task ApplyForJob_DbUpdateExceptionRace_Returns409AndDeletesOrphanCv()
+    {
+        var dbOptions = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase("ThrowingDb_" + Guid.NewGuid())
+            .Options;
+        using var throwingDb = new ThrowingAppDbContext(dbOptions);
+
+        var ctx = BuildContext(_applicantId, "User");
+        var fields = new Dictionary<string, string>
+        {
+            ["job_id"] = _jobId.ToString(),
+            ["cover_letter"] = "Race condition test"
+        };
+        var req = BuildMultipartRequest(fields, "race_cv.pdf");
+
+        var result = await ApplicationEndpoints.ApplyForJob(req, throwingDb, _storage, ctx);
+
+        var statusCodeResult = result as IStatusCodeHttpResult;
+        Assert.NotNull(statusCodeResult);
+        Assert.Equal(409, statusCodeResult.StatusCode);
+
+        // Verify storage directory has no orphan files left
+        var remainingFiles = Directory.GetFiles(_testStorageDir);
+        Assert.Empty(remainingFiles);
+    }
+
+    [Fact]
+    public async Task ApplyForJob_InvalidFileSignature_Returns400BadRequest()
+    {
+        var ctx = BuildContext(_applicantId, "User");
+        var fields = new Dictionary<string, string> { ["job_id"] = _jobId.ToString() };
+        var badPdfBytes = "Not a PDF document"u8.ToArray();
+        var req = BuildMultipartRequest(fields, "cv.pdf", badPdfBytes);
+
+        var result = await ApplicationEndpoints.ApplyForJob(req, _db, _storage, ctx);
+
+        var statusCodeResult = result as IStatusCodeHttpResult;
+        Assert.NotNull(statusCodeResult);
+        Assert.Equal(400, statusCodeResult.StatusCode);
+    }
+
+    [Fact]
+    public async Task ApplyForJob_MissingStrictCvFileField_Returns400ValidationProblem()
+    {
+        var ctx = new DefaultHttpContext();
+        ctx.Request.ContentType = "multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW";
+
+        var formFields = new Dictionary<string, Microsoft.Extensions.Primitives.StringValues>
+        {
+            ["job_id"] = _jobId.ToString()
+        };
+        var fileStream = new MemoryStream("%PDF-1.4 content"u8.ToArray());
+        var formFile = new FormFile(fileStream, 0, fileStream.Length, "wrong_field_name", "cv.pdf");
+        ctx.Request.Form = new FormCollection(formFields, new FormFileCollection { formFile });
+
+        var userCtx = BuildContext(_applicantId, "User");
+        var result = await ApplicationEndpoints.ApplyForJob(ctx.Request, _db, _storage, userCtx);
+
+        var statusCodeResult = result as IStatusCodeHttpResult;
+        Assert.NotNull(statusCodeResult);
+        Assert.Equal(400, statusCodeResult.StatusCode);
+    }
+
+    [Fact]
+    public async Task UpdateApplicationStatus_NoteExceeding1000Chars_Returns400ValidationProblem()
+    {
+        var app = new Application(_jobId, _applicantId, "/cv.pdf");
+        _db.Applications.Add(app);
+        await _db.SaveChangesAsync();
+
+        var recruiterCtx = BuildContext(_recruiterId, "Recruiter");
+        var longNote = new string('A', 1001);
+        var updateReq = new UpdateStatusRequest("reviewed", longNote);
+
+        var result = await ApplicationEndpoints.UpdateApplicationStatus(app.Id, updateReq, _db, recruiterCtx);
+
+        var statusCodeResult = result as IStatusCodeHttpResult;
+        Assert.NotNull(statusCodeResult);
+        Assert.Equal(400, statusCodeResult.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetMyApplications_InvalidStatus_Returns400ValidationProblem()
+    {
+        var ctx = BuildContext(_applicantId, "User");
+        var result = await ApplicationEndpoints.GetMyApplications("invalid_status_xyz", 1, 10, _db, ctx);
+
+        var statusCodeResult = result as IStatusCodeHttpResult;
+        Assert.NotNull(statusCodeResult);
+        Assert.Equal(400, statusCodeResult.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetApplicationsByJobId_InvalidStatus_Returns400ValidationProblem()
+    {
+        var ctx = BuildContext(_recruiterId, "Recruiter");
+        var result = await ApplicationEndpoints.GetApplicationsByJobId(_jobId, "unknown_status", 1, 10, _db, ctx);
+
+        var statusCodeResult = result as IStatusCodeHttpResult;
+        Assert.NotNull(statusCodeResult);
+        Assert.Equal(400, statusCodeResult.StatusCode);
+    }
+
+    [Fact]
+    public async Task ApplyForJob_HeaderOnlyWithoutDevAuth_Returns401Unauthorized()
+    {
+        // Setup HttpContext with header but without ClaimsPrincipal (non-dev simulation)
+        var ctx = new DefaultHttpContext();
+        ctx.Request.Headers["X-User-Id"] = _applicantId.ToString();
+        ctx.Request.Headers["X-User-Role"] = "User";
+
+        var fields = new Dictionary<string, string> { ["job_id"] = _jobId.ToString() };
+        var req = BuildMultipartRequest(fields);
+
+        var result = await ApplicationEndpoints.ApplyForJob(req, _db, _storage, ctx);
+
+        var statusCodeResult = result as IStatusCodeHttpResult;
+        Assert.NotNull(statusCodeResult);
+        Assert.Equal(401, statusCodeResult.StatusCode);
+    }
+
+    [Fact]
+    public async Task DevAuthMiddleware_WhenFlagDisabled_DoesNotSetUser()
+    {
+        var env = new FakeEnv { EnvironmentName = "Development" };
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ENABLE_DEV_AUTH"] = "false"
+        }).Build();
+
+        var middleware = new App.Api.Middleware.DevAuthMiddleware(
+            _ => Task.CompletedTask,
+            NullLogger<App.Api.Middleware.DevAuthMiddleware>.Instance,
+            config,
+            env);
+
+        var ctx = new DefaultHttpContext();
+        ctx.Request.Headers["X-User-Id"] = Guid.NewGuid().ToString();
+
+        await middleware.InvokeAsync(ctx);
+
+        Assert.False(ctx.User.Identity?.IsAuthenticated ?? false);
+    }
+
+    [Fact]
+    public async Task DevAuthMiddleware_WhenFlagEnabledInDev_SetsUser()
+    {
+        var env = new FakeEnv { EnvironmentName = "Development" };
+        var testUserId = Guid.NewGuid();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ENABLE_DEV_AUTH"] = "true"
+        }).Build();
+
+        var middleware = new App.Api.Middleware.DevAuthMiddleware(
+            _ => Task.CompletedTask,
+            NullLogger<App.Api.Middleware.DevAuthMiddleware>.Instance,
+            config,
+            env);
+
+        var ctx = new DefaultHttpContext();
+        ctx.Request.Headers["X-User-Id"] = testUserId.ToString();
+        ctx.Request.Headers["X-User-Role"] = "Recruiter";
+
+        await middleware.InvokeAsync(ctx);
+
+        Assert.True(ctx.User.Identity?.IsAuthenticated);
+        Assert.Equal(testUserId.ToString(), ctx.User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
+        Assert.Equal("Recruiter", ctx.User.FindFirst(ClaimTypes.Role)?.Value);
+    }
+
+    private class FakeEnv : Microsoft.AspNetCore.Hosting.IWebHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = "Development";
+        public string ApplicationName { get; set; } = "App.Api";
+        public string WebRootPath { get; set; } = "";
+        public Microsoft.Extensions.FileProviders.IFileProvider WebRootFileProvider { get; set; } = null!;
+        public string ContentRootPath { get; set; } = "";
+        public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } = null!;
+    }
+
+    private class ThrowingAppDbContext : AppDbContext
+    {
+        public ThrowingAppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
+        public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            throw new DbUpdateException("Duplicate key violation on IX_applications_job_applicant_unique", new Exception());
+        }
     }
 }

@@ -24,10 +24,14 @@ public class StatusHistory : Entity
         if (changedBy == Guid.Empty)
             throw new ArgumentException("ChangedBy is required.", nameof(changedBy));
 
+        var trimmedNote = note?.Trim();
+        if (trimmedNote != null && trimmedNote.Length > NoteMaxLength)
+            throw new ArgumentException($"Note cannot exceed {NoteMaxLength} characters.", nameof(note));
+
         ApplicationId = applicationId;
         Status = status;
         ChangedBy = changedBy;
-        Note = note?.Trim();
+        Note = trimmedNote;
         ChangedAt = DateTime.UtcNow;
     }
 }

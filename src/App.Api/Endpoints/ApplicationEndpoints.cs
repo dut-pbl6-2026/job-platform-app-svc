@@ -15,7 +15,8 @@ public static class ApplicationEndpoints
 
         // APP-01-01: Apply for a job with CV upload
         group.MapPost("/", ApplyForJob)
-            .DisableAntiforgery();
+            .DisableAntiforgery()
+            .WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(10 * 1024 * 1024));
 
         // APP-01-03: View candidate application history
         group.MapGet("/me", GetMyApplications);
@@ -47,12 +48,28 @@ public static class ApplicationEndpoints
     private static (Guid? UserId, string Role) GetIdentity(HttpContext ctx)
     {
         var idStr = ctx.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-                    ?? ctx.Request.Headers["X-User-Id"].FirstOrDefault();
+                    ?? ctx.User.FindFirst("sub")?.Value;
 
         var role = ctx.User.FindFirst(ClaimTypes.Role)?.Value
-                   ?? ctx.Request.Headers["X-User-Role"].FirstOrDefault()
-                   ?? "User";
+                   ?? ctx.User.FindFirst("role")?.Value;
 
+        if (idStr is null)
+        {
+            var env = ctx.RequestServices?.GetService<IWebHostEnvironment>();
+            var config = ctx.RequestServices?.GetService<IConfiguration>();
+            var isDevAuthEnabled = (env?.IsDevelopment() ?? false) &&
+                                   ((config?.GetValue<bool>("ENABLE_DEV_AUTH") ?? false) ||
+                                    string.Equals(Environment.GetEnvironmentVariable("ENABLE_DEV_AUTH"), "true", StringComparison.OrdinalIgnoreCase));
+
+            if (isDevAuthEnabled)
+            {
+                idStr = ctx.Request.Headers["X-User-Id"].FirstOrDefault();
+                role ??= ctx.Request.Headers["X-User-Role"].FirstOrDefault()
+                         ?? ctx.Request.Headers["X-Role"].FirstOrDefault();
+            }
+        }
+
+        role ??= "User";
         return Guid.TryParse(idStr, out var id) ? (id, role) : (null, role);
     }
 
@@ -102,12 +119,12 @@ public static class ApplicationEndpoints
             });
         }
 
-        var cvFile = form.Files.GetFile("cv_file") ?? form.Files.FirstOrDefault();
+        var cvFile = form.Files.GetFile("cv_file");
         if (cvFile is null || cvFile.Length == 0)
         {
             return Results.ValidationProblem(new Dictionary<string, string[]>
             {
-                ["cv_file"] = ["CV file is required for application submission."]
+                ["cv_file"] = ["CV file with form field name 'cv_file' is required for application submission."]
             });
         }
 
@@ -142,11 +159,20 @@ public static class ApplicationEndpoints
         }
         catch (DbUpdateException)
         {
+            var fileName = Path.GetFileName(cvUrl);
+            await storage.DeleteCvAsync(fileName);
+
             return Results.Conflict(new
             {
                 status = 409,
                 message = "Bạn đã ứng tuyển vào công việc này trước đó (409 Conflict)."
             });
+        }
+        catch (Exception)
+        {
+            var fileName = Path.GetFileName(cvUrl);
+            await storage.DeleteCvAsync(fileName);
+            throw;
         }
 
         return Results.Created($"/api/applications/{application.Id}", new
@@ -464,6 +490,14 @@ public static class ApplicationEndpoints
             });
         }
 
+        if (req.Note != null && req.Note.Length > StatusHistory.NoteMaxLength)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["note"] = [$"Note exceeds maximum length of {StatusHistory.NoteMaxLength} characters."]
+            });
+        }
+
         var application = await db.Applications
             .Include(a => a.StatusHistories)
             .FirstOrDefaultAsync(a => a.Id == id);
@@ -514,12 +548,38 @@ public static class ApplicationEndpoints
     /// <summary>
     /// GET /api/applications/cv/{fileName}
     /// Streams uploaded CV file for download/preview.
+    /// Protected endpoint: requires applicant owner or recruiter/admin role.
     /// </summary>
     public static async Task<IResult> DownloadCv(
         string fileName,
-        IFileStorageService storage)
+        AppDbContext db,
+        IFileStorageService storage,
+        HttpContext ctx)
     {
-        var result = await storage.GetCvAsync(fileName);
+        var (userId, role) = GetIdentity(ctx);
+        if (userId is null)
+            return UnauthorizedResult();
+
+        var sanitizedFileName = Path.GetFileName(fileName);
+        if (string.IsNullOrWhiteSpace(sanitizedFileName))
+            return Results.NotFound(new { message = "CV file not found." });
+
+        var targetUrl = $"/api/applications/cv/{sanitizedFileName}";
+        var application = await db.Applications
+            .AsNoTracking()
+            .FirstOrDefaultAsync(a => a.CvUrl == targetUrl || a.CvUrl.EndsWith("/" + sanitizedFileName));
+
+        if (application is null)
+            return Results.NotFound(new { message = "CV file not found." });
+
+        var isOwner = application.ApplicantId == userId.Value;
+        var isRecruiterOrAdmin = role.Equals("Recruiter", StringComparison.OrdinalIgnoreCase) ||
+                                 role.Equals("Admin", StringComparison.OrdinalIgnoreCase);
+
+        if (!isOwner && !isRecruiterOrAdmin)
+            return ForbiddenResult("You are not authorized to view or download this CV.");
+
+        var result = await storage.GetCvAsync(sanitizedFileName);
         if (result is null)
             return Results.NotFound(new { message = "CV file not found." });
 
