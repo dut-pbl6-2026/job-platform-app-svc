@@ -35,7 +35,7 @@ public class LocalCvStorageServiceTests : IDisposable
     [Fact]
     public async Task SaveCvAsync_ValidPdf_SavesSuccessfullyAndReturnsUrl()
     {
-        var content = "Dummy PDF binary content"u8.ToArray();
+        var content = "%PDF-1.4 Valid PDF dummy content"u8.ToArray();
         using var stream = new MemoryStream(content);
 
         var url = await _service.SaveCvAsync(stream, "my_resume.pdf", "application/pdf");
@@ -68,6 +68,16 @@ public class LocalCvStorageServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task SaveCvAsync_InvalidSignature_ThrowsArgumentException()
+    {
+        var fakePdf = "Not a PDF document header"u8.ToArray();
+        using var stream = new MemoryStream(fakePdf);
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            _service.SaveCvAsync(stream, "fake.pdf", "application/pdf"));
+    }
+
+    [Fact]
     public async Task SaveCvAsync_OversizedFile_ThrowsArgumentException()
     {
         // 6MB > 5MB limit
@@ -80,7 +90,8 @@ public class LocalCvStorageServiceTests : IDisposable
     [Fact]
     public async Task DeleteCvAsync_ExistingFile_DeletesAndReturnsTrue()
     {
-        var content = "Some CV"u8.ToArray();
+        // Valid DOCX magic bytes (PK..)
+        var content = new byte[] { 0x50, 0x4B, 0x03, 0x04, 0x14, 0x00, 0x06, 0x00 };
         using var stream = new MemoryStream(content);
         var url = await _service.SaveCvAsync(stream, "test.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
 

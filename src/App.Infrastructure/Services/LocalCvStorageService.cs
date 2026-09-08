@@ -22,6 +22,13 @@ public class LocalCvStorageService : IFileStorageService
         [".docx"] = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     };
 
+    private static readonly Dictionary<string, List<byte[]>> FileSignatures = new(StringComparer.OrdinalIgnoreCase)
+    {
+        [".pdf"] = new() { new byte[] { 0x25, 0x50, 0x44, 0x46 } }, // %PDF
+        [".doc"] = new() { new byte[] { 0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1 } },
+        [".docx"] = new() { new byte[] { 0x50, 0x4B, 0x03, 0x04 } } // PK..
+    };
+
     private readonly string _storageDirectory;
     private readonly ILogger<LocalCvStorageService> _logger;
 
@@ -58,6 +65,8 @@ public class LocalCvStorageService : IFileStorageService
                 $"File extension '{extension}' is not allowed. Permitted formats: {string.Join(", ", AllowedExtensions)}.",
                 nameof(originalFileName));
         }
+
+        ValidateFileSignature(fileStream, extension);
 
         // Sanitize original file name: keep only alphanumeric, dots, dashes, and underscores
         var safeBaseName = Path.GetFileNameWithoutExtension(originalFileName);
@@ -122,5 +131,36 @@ public class LocalCvStorageService : IFileStorageService
         }
 
         return Task.FromResult(false);
+    }
+
+    private static void ValidateFileSignature(Stream stream, string extension)
+    {
+        if (!FileSignatures.TryGetValue(extension, out var validSignatures))
+            return;
+
+        if (!stream.CanSeek)
+            return;
+
+        var maxHeaderLength = validSignatures.Max(s => s.Length);
+        var buffer = new byte[maxHeaderLength];
+        var originalPos = stream.Position;
+
+        int bytesRead = stream.Read(buffer, 0, maxHeaderLength);
+        stream.Position = originalPos;
+
+        if (bytesRead < 4)
+        {
+            throw new ArgumentException("CV file is too small to be a valid document.", nameof(stream));
+        }
+
+        var matches = validSignatures.Any(sig =>
+            bytesRead >= sig.Length && buffer.Take(sig.Length).SequenceEqual(sig));
+
+        if (!matches)
+        {
+            throw new ArgumentException(
+                $"File content signature does not match permitted format for extension '{extension}'.",
+                nameof(stream));
+        }
     }
 }

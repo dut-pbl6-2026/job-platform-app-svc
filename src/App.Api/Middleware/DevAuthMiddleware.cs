@@ -11,28 +11,39 @@ public class DevAuthMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly ILogger<DevAuthMiddleware> _logger;
+    private readonly bool _enabled;
 
-    public DevAuthMiddleware(RequestDelegate next, ILogger<DevAuthMiddleware> logger)
+    public DevAuthMiddleware(
+        RequestDelegate next,
+        ILogger<DevAuthMiddleware> logger,
+        IConfiguration config,
+        IWebHostEnvironment env)
     {
         _next = next;
         _logger = logger;
+        _enabled = env.IsDevelopment() &&
+                   (config.GetValue<bool>("ENABLE_DEV_AUTH") ||
+                    string.Equals(Environment.GetEnvironmentVariable("ENABLE_DEV_AUTH"), "true", StringComparison.OrdinalIgnoreCase));
     }
 
     public async Task InvokeAsync(HttpContext context)
     {
-        var userId = context.Request.Headers["X-User-Id"].FirstOrDefault();
-        var role = context.Request.Headers["X-User-Role"].FirstOrDefault()
-                   ?? context.Request.Headers["X-Role"].FirstOrDefault()
-                   ?? "User";
-
-        if (!string.IsNullOrEmpty(userId) && Guid.TryParse(userId, out _))
+        if (_enabled)
         {
-            var claims = new List<Claim>
+            var userId = context.Request.Headers["X-User-Id"].FirstOrDefault();
+            var role = context.Request.Headers["X-User-Role"].FirstOrDefault()
+                       ?? context.Request.Headers["X-Role"].FirstOrDefault()
+                       ?? "User";
+
+            if (!string.IsNullOrEmpty(userId) && Guid.TryParse(userId, out _))
             {
-                new(ClaimTypes.NameIdentifier, userId),
-                new(ClaimTypes.Role, role)
-            };
-            context.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Gateway"));
+                var claims = new List<Claim>
+                {
+                    new(ClaimTypes.NameIdentifier, userId),
+                    new(ClaimTypes.Role, role)
+                };
+                context.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Gateway"));
+            }
         }
 
         await _next(context);

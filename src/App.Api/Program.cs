@@ -20,9 +20,21 @@ builder.Logging.AddJsonConsole(o =>
 });
 
 // Database connection string from environment (PORT-05 / SEC-08)
-var conn = builder.Configuration.GetConnectionString("AppDb")
-           ?? builder.Configuration["DATABASE_URL_APP"]
-           ?? "Host=localhost;Port=5432;Database=job_platform_app;Username=postgres;Password=postgres";
+var conn = builder.Configuration["DATABASE_URL_APP"]
+           ?? builder.Configuration.GetConnectionString("AppDb");
+
+if (string.IsNullOrWhiteSpace(conn))
+{
+    if (builder.Environment.IsDevelopment())
+    {
+        conn = "Host=localhost;Port=5432;Database=job_platform_app;Username=postgres;Password=postgres";
+    }
+    else
+    {
+        throw new InvalidOperationException(
+            "Database connection string is not configured. Set DATABASE_URL_APP environment variable or ConnectionStrings:AppDb.");
+    }
+}
 
 builder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(conn));
 
@@ -89,7 +101,13 @@ if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
-    app.UseMiddleware<DevAuthMiddleware>();
+
+    var enableDevAuth = app.Configuration.GetValue<bool>("ENABLE_DEV_AUTH") ||
+                        string.Equals(Environment.GetEnvironmentVariable("ENABLE_DEV_AUTH"), "true", StringComparison.OrdinalIgnoreCase);
+    if (enableDevAuth)
+    {
+        app.UseMiddleware<DevAuthMiddleware>();
+    }
 }
 else
 {
