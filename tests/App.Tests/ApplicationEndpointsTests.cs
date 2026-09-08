@@ -640,6 +640,106 @@ public class ApplicationEndpointsTests : IDisposable
         Assert.Equal("Recruiter", ctx.User.FindFirst(ClaimTypes.Role)?.Value);
     }
 
+    [Fact]
+    public async Task UpdateApplicationStatus_PendingToShortlistedDirectly_Returns409Conflict()
+    {
+        var app = new Application(_jobId, _applicantId, "/cv.pdf");
+        _db.Applications.Add(app);
+        await _db.SaveChangesAsync();
+
+        var recruiterCtx = BuildContext(_recruiterId, "Recruiter");
+        var updateReq = new UpdateStatusRequest("shortlisted", "Skipping reviewed directly");
+
+        var result = await ApplicationEndpoints.UpdateApplicationStatus(app.Id, updateReq, _db, recruiterCtx);
+
+        var statusCodeResult = result as IStatusCodeHttpResult;
+        Assert.NotNull(statusCodeResult);
+        Assert.Equal(409, statusCodeResult.StatusCode);
+    }
+
+    [Theory]
+    [InlineData(-1.0)]
+    [InlineData(101.0)]
+    public async Task UpdateApplicationStatus_ScoreOutOfRange_Returns400ValidationProblem(double invalidScore)
+    {
+        var app = new Application(_jobId, _applicantId, "/cv.pdf");
+        _db.Applications.Add(app);
+        await _db.SaveChangesAsync();
+
+        var recruiterCtx = BuildContext(_recruiterId, "Recruiter");
+        var updateReq = new UpdateStatusRequest("reviewed", "Valid note", Score: invalidScore);
+
+        var result = await ApplicationEndpoints.UpdateApplicationStatus(app.Id, updateReq, _db, recruiterCtx);
+
+        var statusCodeResult = result as IStatusCodeHttpResult;
+        Assert.NotNull(statusCodeResult);
+        Assert.Equal(400, statusCodeResult.StatusCode);
+    }
+
+    [Fact]
+    public async Task UpdateApplicationStatus_RecruiterNotesTooLong_Returns400ValidationProblem()
+    {
+        var app = new Application(_jobId, _applicantId, "/cv.pdf");
+        _db.Applications.Add(app);
+        await _db.SaveChangesAsync();
+
+        var recruiterCtx = BuildContext(_recruiterId, "Recruiter");
+        var longNotes = new string('N', Application.RecruiterNotesMaxLength + 1);
+        var updateReq = new UpdateStatusRequest("reviewed", "Valid note", RecruiterNotes: longNotes);
+
+        var result = await ApplicationEndpoints.UpdateApplicationStatus(app.Id, updateReq, _db, recruiterCtx);
+
+        var statusCodeResult = result as IStatusCodeHttpResult;
+        Assert.NotNull(statusCodeResult);
+        Assert.Equal(400, statusCodeResult.StatusCode);
+    }
+
+    [Fact]
+    public void GetStatusFlowDefinition_SerializesToSnakeCase()
+    {
+        var result = ApplicationEndpoints.GetStatusFlowDefinition();
+        var flow = (result as IValueHttpResult)?.Value as StatusFlowDto;
+        Assert.NotNull(flow);
+
+        var json = System.Text.Json.JsonSerializer.Serialize(flow);
+        Assert.Contains("\"all_statuses\":", json);
+        Assert.Contains("\"terminal_statuses\":", json);
+        Assert.Contains("\"transitions\":", json);
+    }
+
+    [Fact]
+    public async Task ApplyForJob_NonUniqueDbUpdateException_CleansUpOrphanCvAndRethrows()
+    {
+        var dbOptions = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase("GenericThrowingDb_" + Guid.NewGuid())
+            .Options;
+        using var throwingDb = new NonUniqueThrowingAppDbContext(dbOptions);
+
+        var ctx = BuildContext(_applicantId, "User");
+        var fields = new Dictionary<string, string>
+        {
+            ["job_id"] = _jobId.ToString(),
+            ["cover_letter"] = "Non unique error test"
+        };
+        var req = BuildMultipartRequest(fields, "non_unique_cv.pdf");
+
+        await Assert.ThrowsAsync<DbUpdateException>(() =>
+            ApplicationEndpoints.ApplyForJob(req, throwingDb, _storage, ctx));
+
+        // Verify orphan CV file was cleaned up on disk even though exception rethrown
+        var remainingFiles = Directory.GetFiles(_testStorageDir);
+        Assert.Empty(remainingFiles);
+    }
+
+    private class NonUniqueThrowingAppDbContext : AppDbContext
+    {
+        public NonUniqueThrowingAppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
+        public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            throw new DbUpdateException("Connection timeout failure", new Exception("Timeout occurred"));
+        }
+    }
+
     private class FakeEnv : Microsoft.AspNetCore.Hosting.IWebHostEnvironment
     {
         public string EnvironmentName { get; set; } = "Development";

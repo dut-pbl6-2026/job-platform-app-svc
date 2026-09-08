@@ -4,6 +4,7 @@ using App.Core.Entities;
 using App.Core.Interfaces;
 using App.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace App.Api.Endpoints;
 
@@ -21,8 +22,8 @@ public static class ApplicationEndpoints
         // APP-01-03: View candidate application history
         group.MapGet("/me", GetMyApplications);
 
-        // System-wide status flow state machine metadata
-        group.MapGet("/status-flow", GetStatusFlowDefinition);
+        // System-wide status flow state machine metadata (Public metadata for client workflow rendering)
+        group.MapGet("/status-flow", GetStatusFlowDefinition).AllowAnonymous();
 
         // APP-01-04: View application details
         group.MapGet("/{id:guid}", GetApplicationById);
@@ -157,7 +158,7 @@ public static class ApplicationEndpoints
         {
             await db.SaveChangesAsync();
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex, "IX_applications_job_applicant_unique"))
         {
             var fileName = Path.GetFileName(cvUrl);
             await storage.DeleteCvAsync(fileName);
@@ -378,6 +379,8 @@ public static class ApplicationEndpoints
     /// <summary>
     /// GET /api/applications/status-flow
     /// Returns the entire system state transition diagram and available statuses.
+    /// Public endpoint (AllowAnonymous): provides static state machine configuration
+    /// so candidate and recruiter frontend applications can dynamically configure workflows.
     /// </summary>
     public static IResult GetStatusFlowDefinition()
     {
@@ -482,20 +485,32 @@ public static class ApplicationEndpoints
         if (!isRecruiterOrAdmin)
             return ForbiddenResult("Only recruiters can update application statuses.");
 
-        if (string.IsNullOrWhiteSpace(req.Status) || !Enum.TryParse<ApplicationStatus>(req.Status, true, out var newStatus))
+        var errors = new Dictionary<string, string[]>();
+        var newStatus = ApplicationStatus.Pending;
+
+        if (string.IsNullOrWhiteSpace(req.Status) || !Enum.TryParse<ApplicationStatus>(req.Status, true, out newStatus))
         {
-            return Results.ValidationProblem(new Dictionary<string, string[]>
-            {
-                ["status"] = ["Invalid status. Allowed values: pending, reviewed, shortlisted, accepted, rejected."]
-            });
+            errors["status"] = ["Invalid status. Allowed values: pending, reviewed, shortlisted, accepted, rejected."];
         }
 
         if (req.Note != null && req.Note.Length > StatusHistory.NoteMaxLength)
         {
-            return Results.ValidationProblem(new Dictionary<string, string[]>
-            {
-                ["note"] = [$"Note exceeds maximum length of {StatusHistory.NoteMaxLength} characters."]
-            });
+            errors["note"] = [$"Note exceeds maximum length of {StatusHistory.NoteMaxLength} characters."];
+        }
+
+        if (req.RecruiterNotes != null && req.RecruiterNotes.Length > Application.RecruiterNotesMaxLength)
+        {
+            errors["recruiter_notes"] = [$"Recruiter notes exceed maximum length of {Application.RecruiterNotesMaxLength} characters."];
+        }
+
+        if (req.Score.HasValue && (req.Score.Value < Application.MinScore || req.Score.Value > Application.MaxScore || double.IsNaN(req.Score.Value) || double.IsInfinity(req.Score.Value)))
+        {
+            errors["score"] = [$"Score must be between {Application.MinScore} and {Application.MaxScore}."];
+        }
+
+        if (errors.Count > 0)
+        {
+            return Results.ValidationProblem(errors);
         }
 
         var application = await db.Applications
@@ -533,7 +548,24 @@ public static class ApplicationEndpoints
             application.SetScore(req.Score.Value);
         }
 
-        await db.SaveChangesAsync();
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Results.Conflict(new
+            {
+                status = 409,
+                message = "The application was modified concurrently by another user. Please reload and try again."
+            });
+        }
+        catch (DbUpdateException)
+        {
+            return Results.Problem(
+                detail: "A database error occurred while updating the application status.",
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
 
         return Results.Ok(new
         {
@@ -587,5 +619,40 @@ public static class ApplicationEndpoints
             result.Value.Stream,
             contentType: result.Value.ContentType,
             fileDownloadName: result.Value.FileName);
+    }
+
+    private static bool IsUniqueConstraintViolation(DbUpdateException ex, string? constraintName = null)
+    {
+        if (ex.InnerException is PostgresException pgEx)
+        {
+            if (pgEx.SqlState == PostgresErrorCodes.UniqueViolation || pgEx.SqlState == "23505")
+            {
+                if (string.IsNullOrEmpty(constraintName) || string.Equals(pgEx.ConstraintName, constraintName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        Exception? current = ex;
+        while (current != null)
+        {
+            var msg = current.Message;
+            if (!string.IsNullOrEmpty(constraintName) && msg.Contains(constraintName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (msg.Contains("23505") ||
+                msg.Contains("UNIQUE constraint failed", StringComparison.OrdinalIgnoreCase) ||
+                msg.Contains("duplicate key", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            current = current.InnerException;
+        }
+
+        return false;
     }
 }

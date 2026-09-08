@@ -7,6 +7,8 @@ public class Application : Entity
     public const int CoverLetterMaxLength = 4000;
     public const int CvUrlMaxLength = 1024;
     public const int RecruiterNotesMaxLength = 2000;
+    public const double MinScore = 0.0;
+    public const double MaxScore = 100.0;
 
     public Guid JobId { get; private set; }
     public Guid ApplicantId { get; private set; }
@@ -43,7 +45,7 @@ public class Application : Entity
     public static readonly IReadOnlyDictionary<ApplicationStatus, IReadOnlyList<ApplicationStatus>> AllowedTransitions =
         new Dictionary<ApplicationStatus, IReadOnlyList<ApplicationStatus>>
         {
-            [ApplicationStatus.Pending] = new[] { ApplicationStatus.Reviewed, ApplicationStatus.Shortlisted, ApplicationStatus.Rejected },
+            [ApplicationStatus.Pending] = new[] { ApplicationStatus.Reviewed, ApplicationStatus.Rejected },
             [ApplicationStatus.Reviewed] = new[] { ApplicationStatus.Shortlisted, ApplicationStatus.Rejected },
             [ApplicationStatus.Shortlisted] = new[] { ApplicationStatus.Accepted, ApplicationStatus.Rejected },
             [ApplicationStatus.Accepted] = Array.Empty<ApplicationStatus>(),
@@ -84,12 +86,18 @@ public class Application : Entity
 
     public void SetRecruiterNotes(string? notes)
     {
+        if (notes != null && notes.Length > RecruiterNotesMaxLength)
+            throw new ArgumentException($"Recruiter notes cannot exceed {RecruiterNotesMaxLength} characters.", nameof(notes));
+
         RecruiterNotes = notes?.Trim();
         Touch();
     }
 
     public void SetScore(double? score)
     {
+        if (score.HasValue && (score.Value < MinScore || score.Value > MaxScore || double.IsNaN(score.Value) || double.IsInfinity(score.Value)))
+            throw new ArgumentOutOfRangeException(nameof(score), $"Score must be between {MinScore} and {MaxScore}.");
+
         Score = score;
         Touch();
     }

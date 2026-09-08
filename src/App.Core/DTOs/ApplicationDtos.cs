@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using App.Core.Entities;
 
 namespace App.Core.DTOs;
@@ -46,9 +47,9 @@ public record UpdateStatusRequest(
 );
 
 public record StatusFlowDto(
-    IReadOnlyList<string> AllStatuses,
-    IReadOnlyList<string> TerminalStatuses,
-    IReadOnlyDictionary<string, IReadOnlyList<string>> Transitions
+    [property: JsonPropertyName("all_statuses")] IReadOnlyList<string> AllStatuses,
+    [property: JsonPropertyName("terminal_statuses")] IReadOnlyList<string> TerminalStatuses,
+    [property: JsonPropertyName("transitions")] IReadOnlyDictionary<string, IReadOnlyList<string>> Transitions
 );
 
 public record PaginatedResponse<T>(

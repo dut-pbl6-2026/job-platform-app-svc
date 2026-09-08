@@ -183,4 +183,56 @@ public class ApplicationEntityTests
         Assert.Throws<InvalidOperationException>(() =>
             rejectedApp.UpdateStatus(ApplicationStatus.Reviewed, recruiterId));
     }
+
+    [Fact]
+    public void StatusFlow_PendingCannotSkipToShortlisted()
+    {
+        var app = new Application(Guid.NewGuid(), Guid.NewGuid(), "/cv.pdf");
+        var recruiterId = Guid.NewGuid();
+
+        Assert.False(app.CanTransitionTo(ApplicationStatus.Shortlisted));
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            app.UpdateStatus(ApplicationStatus.Shortlisted, recruiterId));
+        Assert.Contains("Invalid status transition", ex.Message);
+    }
+
+    [Fact]
+    public void SetRecruiterNotes_ExceedingMaxLength_ThrowsArgumentException()
+    {
+        var app = new Application(Guid.NewGuid(), Guid.NewGuid(), "/cv.pdf");
+        var longNotes = new string('A', Application.RecruiterNotesMaxLength + 1);
+
+        var ex = Assert.Throws<ArgumentException>(() => app.SetRecruiterNotes(longNotes));
+        Assert.Contains("Recruiter notes cannot exceed", ex.Message);
+    }
+
+    [Theory]
+    [InlineData(-0.1)]
+    [InlineData(-10.0)]
+    [InlineData(100.1)]
+    [InlineData(150.0)]
+    public void SetScore_OutOfRange_ThrowsArgumentOutOfRangeException(double invalidScore)
+    {
+        var app = new Application(Guid.NewGuid(), Guid.NewGuid(), "/cv.pdf");
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => app.SetScore(invalidScore));
+    }
+
+    [Fact]
+    public void SetScore_ValidRange_Succeeds()
+    {
+        var app = new Application(Guid.NewGuid(), Guid.NewGuid(), "/cv.pdf");
+
+        app.SetScore(0.0);
+        Assert.Equal(0.0, app.Score);
+
+        app.SetScore(100.0);
+        Assert.Equal(100.0, app.Score);
+
+        app.SetScore(85.5);
+        Assert.Equal(85.5, app.Score);
+
+        app.SetScore(null);
+        Assert.Null(app.Score);
+    }
 }
