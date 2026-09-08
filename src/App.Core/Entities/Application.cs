@@ -45,7 +45,11 @@ public class Application : Entity
     public static readonly IReadOnlyDictionary<ApplicationStatus, IReadOnlyList<ApplicationStatus>> AllowedTransitions =
         new Dictionary<ApplicationStatus, IReadOnlyList<ApplicationStatus>>
         {
+<<<<<<< HEAD
             [ApplicationStatus.Pending] = new[] { ApplicationStatus.Reviewed, ApplicationStatus.Rejected },
+=======
+            [ApplicationStatus.Pending] = new[] { ApplicationStatus.Reviewed, ApplicationStatus.Shortlisted, ApplicationStatus.Rejected },
+>>>>>>> 51cf00ad85077f8148705bed9cb84ef939879c08
             [ApplicationStatus.Reviewed] = new[] { ApplicationStatus.Shortlisted, ApplicationStatus.Rejected },
             [ApplicationStatus.Shortlisted] = new[] { ApplicationStatus.Accepted, ApplicationStatus.Rejected },
             [ApplicationStatus.Accepted] = Array.Empty<ApplicationStatus>(),

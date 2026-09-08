@@ -22,8 +22,13 @@ public static class ApplicationEndpoints
         // APP-01-03: View candidate application history
         group.MapGet("/me", GetMyApplications);
 
+<<<<<<< HEAD
         // System-wide status flow state machine metadata (Public metadata for client workflow rendering)
         group.MapGet("/status-flow", GetStatusFlowDefinition).AllowAnonymous();
+=======
+        // System-wide status flow state machine metadata
+        group.MapGet("/status-flow", GetStatusFlowDefinition);
+>>>>>>> 51cf00ad85077f8148705bed9cb84ef939879c08
 
         // APP-01-04: View application details
         group.MapGet("/{id:guid}", GetApplicationById);
@@ -158,23 +163,31 @@ public static class ApplicationEndpoints
         {
             await db.SaveChangesAsync();
         }
+<<<<<<< HEAD
         catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex, "IX_applications_job_applicant_unique"))
         {
             var fileName = Path.GetFileName(cvUrl);
             await storage.DeleteCvAsync(fileName);
 
+=======
+        catch (DbUpdateException)
+        {
+>>>>>>> 51cf00ad85077f8148705bed9cb84ef939879c08
             return Results.Conflict(new
             {
                 status = 409,
                 message = "Bạn đã ứng tuyển vào công việc này trước đó (409 Conflict)."
             });
         }
+<<<<<<< HEAD
         catch (Exception)
         {
             var fileName = Path.GetFileName(cvUrl);
             await storage.DeleteCvAsync(fileName);
             throw;
         }
+=======
+>>>>>>> 51cf00ad85077f8148705bed9cb84ef939879c08
 
         return Results.Created($"/api/applications/{application.Id}", new
         {
@@ -379,8 +392,11 @@ public static class ApplicationEndpoints
     /// <summary>
     /// GET /api/applications/status-flow
     /// Returns the entire system state transition diagram and available statuses.
+<<<<<<< HEAD
     /// Public endpoint (AllowAnonymous): provides static state machine configuration
     /// so candidate and recruiter frontend applications can dynamically configure workflows.
+=======
+>>>>>>> 51cf00ad85077f8148705bed9cb84ef939879c08
     /// </summary>
     public static IResult GetStatusFlowDefinition()
     {
@@ -548,6 +564,7 @@ public static class ApplicationEndpoints
             application.SetScore(req.Score.Value);
         }
 
+<<<<<<< HEAD
         try
         {
             await db.SaveChangesAsync();
@@ -566,6 +583,9 @@ public static class ApplicationEndpoints
                 detail: "A database error occurred while updating the application status.",
                 statusCode: StatusCodes.Status500InternalServerError);
         }
+=======
+        await db.SaveChangesAsync();
+>>>>>>> 51cf00ad85077f8148705bed9cb84ef939879c08
 
         return Results.Ok(new
         {

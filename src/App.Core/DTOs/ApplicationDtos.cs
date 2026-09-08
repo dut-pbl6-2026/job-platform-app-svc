@@ -47,9 +47,15 @@ public record UpdateStatusRequest(
 );
 
 public record StatusFlowDto(
+<<<<<<< HEAD
     [property: JsonPropertyName("all_statuses")] IReadOnlyList<string> AllStatuses,
     [property: JsonPropertyName("terminal_statuses")] IReadOnlyList<string> TerminalStatuses,
     [property: JsonPropertyName("transitions")] IReadOnlyDictionary<string, IReadOnlyList<string>> Transitions
+=======
+    IReadOnlyList<string> AllStatuses,
+    IReadOnlyList<string> TerminalStatuses,
+    IReadOnlyDictionary<string, IReadOnlyList<string>> Transitions
+>>>>>>> 51cf00ad85077f8148705bed9cb84ef939879c08
 );
 
 public record PaginatedResponse<T>(
