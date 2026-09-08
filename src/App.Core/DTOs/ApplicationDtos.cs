@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using App.Core.Entities;
 
 namespace App.Core.DTOs;
@@ -15,7 +16,8 @@ public record ApplicationDetailDto(
     double? Score,
     DateTime CreatedAt,
     DateTime UpdatedAt,
-    IReadOnlyList<StatusHistoryDto> StatusHistory
+    IReadOnlyList<StatusHistoryDto> StatusHistory,
+    IReadOnlyList<string>? NextAllowedStatuses = null
 );
 
 public record ApplicationSummaryDto(
@@ -39,7 +41,15 @@ public record StatusHistoryDto(
 
 public record UpdateStatusRequest(
     string Status,
-    string? Note
+    string? Note = null,
+    string? RecruiterNotes = null,
+    double? Score = null
+);
+
+public record StatusFlowDto(
+    [property: JsonPropertyName("all_statuses")] IReadOnlyList<string> AllStatuses,
+    [property: JsonPropertyName("terminal_statuses")] IReadOnlyList<string> TerminalStatuses,
+    [property: JsonPropertyName("transitions")] IReadOnlyDictionary<string, IReadOnlyList<string>> Transitions
 );
 
 public record PaginatedResponse<T>(
