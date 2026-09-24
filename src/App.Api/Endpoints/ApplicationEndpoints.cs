@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using App.Api.Services;
 using App.Core.DTOs;
 using App.Core.Entities;
 using App.Core.Interfaces;
@@ -89,7 +90,8 @@ public static class ApplicationEndpoints
         HttpRequest request,
         AppDbContext db,
         IFileStorageService storage,
-        HttpContext ctx)
+        HttpContext ctx,
+        ApplicationEventPublisher? events = null)
     {
         var (userId, _) = GetIdentity(ctx);
         if (userId is null)
@@ -174,6 +176,12 @@ public static class ApplicationEndpoints
             var fileName = Path.GetFileName(cvUrl);
             await storage.DeleteCvAsync(fileName);
             throw;
+        }
+
+        // PBL6-34: Kafka application.submitted (best-effort, post-commit).
+        if (events is not null)
+        {
+            await events.PublishSubmittedAsync(application);
         }
 
         return Results.Created($"/api/applications/{application.Id}", new
@@ -473,7 +481,8 @@ public static class ApplicationEndpoints
         Guid id,
         UpdateStatusRequest req,
         AppDbContext db,
-        HttpContext ctx)
+        HttpContext ctx,
+        ApplicationEventPublisher? events = null)
     {
         var (userId, role) = GetIdentity(ctx);
         if (userId is null)
@@ -565,6 +574,12 @@ public static class ApplicationEndpoints
             return Results.Problem(
                 detail: "A database error occurred while updating the application status.",
                 statusCode: StatusCodes.Status500InternalServerError);
+        }
+
+        // PBL6-34: Kafka application.status_changed (best-effort, post-commit).
+        if (events is not null)
+        {
+            await events.PublishStatusChangedAsync(application, previousStatus.ToString(), userId.Value);
         }
 
         return Results.Ok(new

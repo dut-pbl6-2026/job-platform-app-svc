@@ -1,13 +1,16 @@
 using System.Text;
 using App.Api.Endpoints;
 using App.Api.Middleware;
+using App.Api.Services;
 using App.Core.Interfaces;
 using App.Infrastructure.Data;
 using App.Infrastructure.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using SharedKernel;
+using SharedKernel.Kafka;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -40,6 +43,25 @@ builder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(conn));
 
 // Register Local CV File Storage
 builder.Services.AddSingleton<IFileStorageService, LocalCvStorageService>();
+
+// PBL6-34: Kafka application-events producer (SRS KAFKA-01-02). Graceful degradation
+// without KAFKA_BOOTSTRAP_SERVERS via no-op producer.
+builder.Services.Configure<KafkaOptions>(o =>
+{
+    o.BootstrapServers = builder.Configuration["KAFKA_BOOTSTRAP_SERVERS"]
+        ?? builder.Configuration["Kafka:BootstrapServers"] ?? "";
+});
+builder.Services.AddSingleton<IKafkaProducer>(sp =>
+{
+    var options = sp.GetRequiredService<IOptions<KafkaOptions>>();
+    if (string.IsNullOrWhiteSpace(options.Value.BootstrapServers))
+    {
+        return new NullKafkaProducer(sp.GetRequiredService<ILogger<NullKafkaProducer>>());
+    }
+
+    return new KafkaProducerService(options, sp.GetRequiredService<ILogger<KafkaProducerService>>());
+});
+builder.Services.AddSingleton<ApplicationEventPublisher>();
 
 // Auth config
 if (!builder.Environment.IsDevelopment())
