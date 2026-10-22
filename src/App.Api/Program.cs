@@ -63,6 +63,14 @@ builder.Services.AddSingleton<IKafkaProducer>(sp =>
 });
 builder.Services.AddSingleton<ApplicationEventPublisher>();
 
+// PBL6-34 / B-10: job-svc HTTP client resolves JobTitle for application events.
+// App-svc has no job read model, so the title is fetched over HTTP before publishing.
+// Best-effort: disabled when JOB_SERVICE_URL is unset; failures publish an empty title.
+builder.Services.AddHttpClient<JobServiceClient>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(5);
+});
+
 // Auth config
 if (!builder.Environment.IsDevelopment())
 {

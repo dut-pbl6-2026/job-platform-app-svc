@@ -7,6 +7,7 @@
   <ItemGroup>
     <ProjectReference Include="../App.Core/App.Core.csproj" />
     <ProjectReference Include="../App.Infrastructure/App.Infrastructure.csproj" />
+    <PackageReference Include="JobPlatform.SharedKernel" Version="0.2.0" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.4">
       <PrivateAssets>all</PrivateAssets>

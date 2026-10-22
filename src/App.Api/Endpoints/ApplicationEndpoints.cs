@@ -91,7 +91,8 @@ public static class ApplicationEndpoints
         AppDbContext db,
         IFileStorageService storage,
         HttpContext ctx,
-        ApplicationEventPublisher? events = null)
+        ApplicationEventPublisher? events = null,
+        JobServiceClient? jobClient = null)
     {
         var (userId, _) = GetIdentity(ctx);
         if (userId is null)
@@ -179,9 +180,13 @@ public static class ApplicationEndpoints
         }
 
         // PBL6-34: Kafka application.submitted (best-effort, post-commit).
+        // B-10: resolve JobTitle from job-svc over HTTP; empty title is tolerated.
         if (events is not null)
         {
-            await events.PublishSubmittedAsync(application);
+            var jobTitle = jobClient is null
+                ? string.Empty
+                : await jobClient.GetJobTitleAsync(application.JobId, CancellationToken.None);
+            await events.PublishSubmittedAsync(application, jobTitle);
         }
 
         return Results.Created($"/api/applications/{application.Id}", new
@@ -482,7 +487,8 @@ public static class ApplicationEndpoints
         UpdateStatusRequest req,
         AppDbContext db,
         HttpContext ctx,
-        ApplicationEventPublisher? events = null)
+        ApplicationEventPublisher? events = null,
+        JobServiceClient? jobClient = null)
     {
         var (userId, role) = GetIdentity(ctx);
         if (userId is null)
@@ -577,9 +583,13 @@ public static class ApplicationEndpoints
         }
 
         // PBL6-34: Kafka application.status_changed (best-effort, post-commit).
+        // B-10: resolve JobTitle from job-svc over HTTP; empty title is tolerated.
         if (events is not null)
         {
-            await events.PublishStatusChangedAsync(application, previousStatus.ToString(), userId.Value);
+            var jobTitle = jobClient is null
+                ? string.Empty
+                : await jobClient.GetJobTitleAsync(application.JobId, CancellationToken.None);
+            await events.PublishStatusChangedAsync(application, previousStatus.ToString(), userId.Value, jobTitle);
         }
 
         return Results.Ok(new
