@@ -1,8 +1,23 @@
 name: ci
-on: { push: { branches: [main] }, pull_request: { branches: [main] } }
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: echo "ci placeholder"
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.100"
+      - name: Restore dependencies
+        run: dotnet restore AppService.sln
+      - name: Verify formatting
+        run: dotnet format AppService.sln --no-restore --verify-no-changes
+      - name: Build
+        run: dotnet build AppService.sln --no-restore --warnaserror
+      - name: Test
+        run: dotnet test AppService.sln --no-build --no-restore
