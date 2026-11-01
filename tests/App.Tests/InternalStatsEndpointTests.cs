@@ -14,7 +14,7 @@ namespace App.Tests;
 
 /// <summary>
 /// feat(admin) Slice 6: token-authenticated application stats for auth-svc aggregation.
-/// Missing/wrong token → 401, unconfigured token → 503, counts grouped by status,
+/// Missing/wrong/unconfigured token → 401 (fail-closed auth), counts grouped by status,
 /// newThisMonth scoped to the UTC month.
 /// </summary>
 public sealed class InternalStatsEndpointTests : IDisposable
@@ -64,12 +64,12 @@ public sealed class InternalStatsEndpointTests : IDisposable
     }
 
     [Fact]
-    public async Task GetStats_MissingConfiguredToken_Returns503()
+    public async Task GetStats_MissingConfiguredToken_Returns401()
     {
         var result = await Invoke(Context("Bearer anything"), configuredToken: null);
 
         var status = Assert.IsAssignableFrom<IStatusCodeHttpResult>(result);
-        Assert.Equal(503, status.StatusCode);
+        Assert.Equal(401, status.StatusCode);
     }
 
     [Fact]
