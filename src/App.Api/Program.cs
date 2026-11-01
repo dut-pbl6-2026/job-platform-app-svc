@@ -11,6 +11,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using SharedKernel;
 using SharedKernel.Kafka;
+using OpenTelemetry.Metrics;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -21,6 +22,16 @@ builder.Logging.AddJsonConsole(o =>
     o.IncludeScopes = true;
     o.TimestampFormat = "yyyy-MM-ddTHH:mm:ssZ";
 });
+
+builder.Services.AddOpenTelemetry()
+    .WithMetrics(metrics =>
+    {
+        metrics
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddRuntimeInstrumentation()
+            .AddPrometheusExporter();
+    });
 
 // Database connection string from environment (PORT-05 / SEC-08)
 var conn = builder.Configuration["DATABASE_URL_APP"]
@@ -145,6 +156,7 @@ else
     app.UseAuthorization();
 }
 
+app.MapPrometheusScrapingEndpoint();
 // Health check endpoint (6-nfr.md:REL-06, 8-system-architecture.md)
 app.MapGet("/health", () => Results.Ok(new { status = "ok", service = "application" }))
    .WithTags("Health")
