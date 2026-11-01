@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
     <ProjectReference Include="../App.Core/App.Core.csproj" />
     <ProjectReference Include="../App.Infrastructure/App.Infrastructure.csproj" />
     <PackageReference Include="JobPlatform.SharedKernel" Version="0.2.0" />
