@@ -23,6 +23,7 @@ builder.Logging.AddJsonConsole(o =>
     o.TimestampFormat = "yyyy-MM-ddTHH:mm:ssZ";
 });
 
+// Monitoring: expose OpenTelemetry metrics on /metrics (Prometheus scrape target).
 builder.Services.AddOpenTelemetry()
     .WithMetrics(metrics =>
     {
@@ -156,7 +157,13 @@ else
     app.UseAuthorization();
 }
 
-app.MapPrometheusScrapingEndpoint();
+// Monitoring: /metrics is meant for the internal scrape network; keep it off in
+// Production unless METRICS_ENABLED=true (all services are publicly reachable).
+if (app.Configuration.GetValue("METRICS_ENABLED", !app.Environment.IsProduction()))
+{
+    app.MapPrometheusScrapingEndpoint();
+}
+
 // Health check endpoint (6-nfr.md:REL-06, 8-system-architecture.md)
 app.MapGet("/health", () => Results.Ok(new { status = "ok", service = "application" }))
    .WithTags("Health")
