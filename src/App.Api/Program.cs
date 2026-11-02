@@ -1,6 +1,7 @@
 using System.Text;
 using App.Api.Endpoints;
 using App.Api.Middleware;
+using App.Api.Observability;
 using App.Api.Services;
 using App.Core.Interfaces;
 using App.Infrastructure.Data;
@@ -15,13 +16,8 @@ using OpenTelemetry.Metrics;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Structured JSON logging
-builder.Logging.ClearProviders();
-builder.Logging.AddJsonConsole(o =>
-{
-    o.IncludeScopes = true;
-    o.TimestampFormat = "yyyy-MM-ddTHH:mm:ssZ";
-});
+// PBL6-49: Serilog (compact JSON in non-Development) + correlation id
+builder.AddServiceLogging("application");
 
 // Monitoring: expose OpenTelemetry metrics on /metrics (Prometheus scrape target).
 builder.Services.AddOpenTelemetry()
@@ -52,6 +48,7 @@ if (string.IsNullOrWhiteSpace(conn))
 }
 
 builder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(conn));
+builder.Services.AddServiceHealthChecks<AppDbContext>(builder.Configuration, kafka: true);
 
 // Register Local CV File Storage
 builder.Services.AddSingleton<IFileStorageService, LocalCvStorageService>();
@@ -137,6 +134,7 @@ builder.Services.AddSwaggerGen(o =>
 
 var app = builder.Build();
 
+app.UseServiceLogging();
 app.UseExceptionHandler();
 
 if (app.Environment.IsDevelopment())
@@ -165,9 +163,8 @@ if (app.Configuration.GetValue("METRICS_ENABLED", !app.Environment.IsProduction(
 }
 
 // Health check endpoint (6-nfr.md:REL-06, 8-system-architecture.md)
-app.MapGet("/health", () => Results.Ok(new { status = "ok", service = "application" }))
-   .WithTags("Health")
-   .ExcludeFromDescription();
+// /health = static liveness, /health/ready = dependency checks (PBL6-49)
+app.MapServiceHealth("application");
 
 app.MapGet("/", () => Results.Ok(new { service = "application", version = "0.1.0" }))
    .ExcludeFromDescription();
