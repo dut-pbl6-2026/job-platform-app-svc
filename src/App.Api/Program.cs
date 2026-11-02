@@ -11,6 +11,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using SharedKernel;
 using SharedKernel.Kafka;
+using OpenTelemetry.Metrics;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -21,6 +22,17 @@ builder.Logging.AddJsonConsole(o =>
     o.IncludeScopes = true;
     o.TimestampFormat = "yyyy-MM-ddTHH:mm:ssZ";
 });
+
+// Monitoring: expose OpenTelemetry metrics on /metrics (Prometheus scrape target).
+builder.Services.AddOpenTelemetry()
+    .WithMetrics(metrics =>
+    {
+        metrics
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddRuntimeInstrumentation()
+            .AddPrometheusExporter();
+    });
 
 // Database connection string from environment (PORT-05 / SEC-08)
 var conn = builder.Configuration["DATABASE_URL_APP"]
@@ -143,6 +155,13 @@ else
 {
     app.UseAuthentication();
     app.UseAuthorization();
+}
+
+// Monitoring: /metrics is meant for the internal scrape network; keep it off in
+// Production unless METRICS_ENABLED=true (all services are publicly reachable).
+if (app.Configuration.GetValue("METRICS_ENABLED", !app.Environment.IsProduction()))
+{
+    app.MapPrometheusScrapingEndpoint();
 }
 
 // Health check endpoint (6-nfr.md:REL-06, 8-system-architecture.md)
