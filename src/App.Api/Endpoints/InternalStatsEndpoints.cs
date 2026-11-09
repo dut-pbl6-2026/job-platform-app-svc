@@ -1,5 +1,4 @@
-﻿using System.Security.Cryptography;
-using System.Text;
+﻿using App.Api.Auth;
 using App.Core.Entities;
 using App.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
@@ -14,9 +13,7 @@ namespace App.Api.Endpoints;
 public static class InternalStatsEndpoints
 {
     /// <summary>Configuration/env key holding the shared internal service token.</summary>
-    public const string TokenConfigKey = "INTERNAL_SERVICE_TOKEN";
-
-    private const string BearerPrefix = "Bearer ";
+    public const string TokenConfigKey = InternalServiceAuth.TokenConfigKey;
 
     public static WebApplication MapInternalStatsEndpoints(this WebApplication app)
     {
@@ -33,21 +30,11 @@ public static class InternalStatsEndpoints
         ILoggerFactory loggerFactory,
         CancellationToken ct = default)
     {
-        var logger = loggerFactory.CreateLogger("InternalStatsEndpoints");
-        var expected = config[TokenConfigKey];
-        if (string.IsNullOrWhiteSpace(expected))
+        var denied = InternalServiceAuth.Authorize(
+            ctx, config, loggerFactory.CreateLogger("InternalStatsEndpoints"));
+        if (denied is not null)
         {
-            // Fail closed: an unconfigured token must never turn the endpoint public.
-            // Return 401 (not 503) — misconfigured token is an auth failure, not a service outage.
-            logger.LogError(
-                "{TokenKey} is not configured. Returning 401 to avoid exposing the endpoint.",
-                TokenConfigKey);
-            return Results.Json(new { message = "Unauthorized" }, statusCode: 401);
-        }
-
-        if (!IsAuthorized(ctx.Request.Headers.Authorization.ToString(), expected))
-        {
-            return Results.Json(new { message = "Unauthorized" }, statusCode: 401);
+            return denied;
         }
 
         var applications = db.Applications.AsNoTracking();
@@ -67,27 +54,6 @@ public static class InternalStatsEndpoints
             Accepted: counts.GetValueOrDefault(ApplicationStatus.Accepted),
             Rejected: counts.GetValueOrDefault(ApplicationStatus.Rejected),
             NewThisMonth: newThisMonth));
-    }
-
-    private static bool IsAuthorized(string header, string expected)
-    {
-        if (!header.StartsWith(BearerPrefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        var token = header[BearerPrefix.Length..].Trim();
-        if (token.Length == 0)
-        {
-            return false;
-        }
-
-        // Hash both sides first so the compared arrays are always the same length
-        // (FixedTimeEquals returns early on a length mismatch, which would leak the
-        // expected token's length), then compare in constant time.
-        return CryptographicOperations.FixedTimeEquals(
-            SHA256.HashData(Encoding.UTF8.GetBytes(token)),
-            SHA256.HashData(Encoding.UTF8.GetBytes(expected)));
     }
 }
 
