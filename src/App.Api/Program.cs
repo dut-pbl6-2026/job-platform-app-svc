@@ -172,6 +172,7 @@ app.MapGet("/", () => Results.Ok(new { service = "application", version = "0.1.0
 // Register application endpoints
 app.MapApplicationEndpoints();
 app.MapInternalStatsEndpoints();
+app.MapInternalApplicationsEndpoints();
 
 // Auto-migrate on startup if database is available
 using (var scope = app.Services.CreateScope())
