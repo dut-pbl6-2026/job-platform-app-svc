@@ -15,6 +15,10 @@ COPY --from=build /app/publish .
 EXPOSE 5004
 ENV ASPNETCORE_URLS=http://+:5004
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+# CV storage (APP_CV_STORAGE_PATH, a named volume in compose). Docker seeds an empty named volume with
+# this directory's ownership, so it must exist and belong to the non-root app user; otherwise the
+# volume is root-owned and every upload fails with "Permission denied".
+RUN mkdir -p /data/cv && chown app:app /data/cv
 USER app
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD curl -f http://localhost:5004/health || exit 1
