@@ -42,6 +42,10 @@ public class DevAuthMiddleware
                     new(ClaimTypes.NameIdentifier, userId),
                     new(ClaimTypes.Role, role)
                 };
+                // Recruiter company, forwarded by the gateway from the JWT company_id claim.
+                var company = context.Request.Headers["X-User-Company"].FirstOrDefault();
+                if (Guid.TryParse(company, out var companyId) && companyId != Guid.Empty)
+                    claims.Add(new Claim("company_id", companyId.ToString()));
                 context.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Gateway"));
             }
         }
