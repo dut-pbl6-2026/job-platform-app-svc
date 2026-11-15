@@ -4,6 +4,7 @@ using App.Core.DTOs;
 using App.Core.Entities;
 using App.Core.Interfaces;
 using App.Infrastructure.Data;
+using App.Infrastructure.Outbox;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
@@ -132,7 +133,6 @@ public static class ApplicationEndpoints
         AppDbContext db,
         IFileStorageService storage,
         HttpContext ctx,
-        ApplicationEventPublisher? events = null,
         JobServiceClient? jobClient = null)
     {
         var (userId, _) = GetIdentity(ctx);
@@ -216,6 +216,8 @@ public static class ApplicationEndpoints
 
         var application = new Application(jobId, userId.Value, cvUrl, coverLetter);
         db.Applications.Add(application);
+        // Same SaveChanges as the application row: the event commits with the application or not at all.
+        db.OutboxEvents.Add(ApplicationOutboxEvents.Submitted(application, job!.Title));
 
         try
         {
@@ -237,12 +239,6 @@ public static class ApplicationEndpoints
             var fileName = Path.GetFileName(cvUrl);
             await storage.DeleteCvAsync(fileName);
             throw;
-        }
-
-        // PBL6-34: Kafka application.submitted (best-effort, post-commit).
-        if (events is not null)
-        {
-            await events.PublishSubmittedAsync(application, job!.Title);
         }
 
         return Results.Created($"/api/applications/{application.Id}", new
@@ -598,7 +594,6 @@ public static class ApplicationEndpoints
         UpdateStatusRequest req,
         AppDbContext db,
         HttpContext ctx,
-        ApplicationEventPublisher? events = null,
         JobServiceClient? jobClient = null)
     {
         var (userId, role) = GetIdentity(ctx);
@@ -677,6 +672,10 @@ public static class ApplicationEndpoints
             application.SetScore(req.Score.Value);
         }
 
+        // Resolved before the save so the event row carries the title. Best-effort: empty when job-svc fails.
+        var jobTitle = await ResolveJobTitleAsync(jobClient, application.JobId);
+        db.OutboxEvents.Add(ApplicationOutboxEvents.StatusChanged(application, previousStatus.ToString(), userId.Value, jobTitle));
+
         try
         {
             await db.SaveChangesAsync();
@@ -694,13 +693,6 @@ public static class ApplicationEndpoints
             return Results.Problem(
                 detail: "A database error occurred while updating the application status.",
                 statusCode: StatusCodes.Status500InternalServerError);
-        }
-
-        // PBL6-34: Kafka application.status_changed (best-effort, post-commit).
-        if (events is not null)
-        {
-            var jobTitle = await ResolveJobTitleAsync(jobClient, application.JobId);
-            await events.PublishStatusChangedAsync(application, previousStatus.ToString(), userId.Value, jobTitle);
         }
 
         return Results.Ok(new

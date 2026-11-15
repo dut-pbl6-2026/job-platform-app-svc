@@ -6,6 +6,7 @@ using App.Api.Services;
 using App.Core.Interfaces;
 using App.Infrastructure.Data;
 using App.Infrastructure.Services;
+using App.Infrastructure.Workers;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -53,8 +54,8 @@ builder.Services.AddServiceHealthChecks<AppDbContext>(builder.Configuration, kaf
 // Register Local CV File Storage
 builder.Services.AddSingleton<IFileStorageService, LocalCvStorageService>();
 
-// PBL6-34: Kafka application-events producer (SRS KAFKA-01-02). Graceful degradation
-// without KAFKA_BOOTSTRAP_SERVERS via no-op producer.
+// PBL6-34: Kafka application-events producer (SRS KAFKA-01-02), used by OutboxPublisherService.
+// Without KAFKA_BOOTSTRAP_SERVERS every publish fails and the rows wait in the outbox.
 builder.Services.Configure<KafkaOptions>(o =>
 {
     o.BootstrapServers = builder.Configuration["KAFKA_BOOTSTRAP_SERVERS"]
@@ -65,12 +66,13 @@ builder.Services.AddSingleton<IKafkaProducer>(sp =>
     var options = sp.GetRequiredService<IOptions<KafkaOptions>>();
     if (string.IsNullOrWhiteSpace(options.Value.BootstrapServers))
     {
-        return new NullKafkaProducer(sp.GetRequiredService<ILogger<NullKafkaProducer>>());
+        return new UnconfiguredKafkaProducer();
     }
 
     return new KafkaProducerService(options, sp.GetRequiredService<ILogger<KafkaProducerService>>());
 });
-builder.Services.AddSingleton<ApplicationEventPublisher>();
+// Transactional outbox: application events are written in the same SaveChanges as the change and sent here.
+builder.Services.AddHostedService<OutboxPublisherService>();
 
 // PBL6-34 / B-10: job-svc HTTP client resolves JobTitle for application events.
 // App-svc has no job read model, so the title is fetched over HTTP before publishing.

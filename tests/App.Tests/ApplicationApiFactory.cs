@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 
 namespace App.Tests;
 
@@ -39,6 +40,10 @@ public sealed class ApplicationApiFactory : WebApplicationFactory<Program>
             services.RemoveAll<DbContextOptions<AppDbContext>>();
             services.RemoveAll<IDbContextOptionsConfiguration<AppDbContext>>();
             services.AddDbContext<AppDbContext>(o => o.UseInMemoryDatabase(_databaseName));
+
+            // The outbox publisher would send and mark rows in the background and race the assertions.
+            // Tests run publish cycles explicitly (see OutboxPublisherTests).
+            services.RemoveAll<IHostedService>();
 
             services.RemoveAll<JobServiceClient>();
             services.AddSingleton(TestJobCompany.WithResponder(_jobResponder));

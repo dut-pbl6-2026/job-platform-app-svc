@@ -9,6 +9,7 @@ public class AppDbContext : DbContext
 
     public DbSet<Application> Applications => Set<Application>();
     public DbSet<StatusHistory> StatusHistories => Set<StatusHistory>();
+    public DbSet<OutboxEvent> OutboxEvents => Set<OutboxEvent>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -69,6 +70,30 @@ public class AppDbContext : DbContext
                 .HasMaxLength(32);
 
             e.HasIndex(x => x.ApplicationId).HasDatabaseName("IX_status_history_application_id");
+        });
+
+        b.Entity<OutboxEvent>(e =>
+        {
+            e.ToTable("outbox_events");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+
+            e.Property(x => x.EventType).HasMaxLength(OutboxEvent.EventTypeMaxLength).IsRequired();
+            e.Property(x => x.Payload).IsRequired();
+            e.Property(x => x.AggregateId).IsRequired();
+            e.Property(x => x.IsPublished).HasDefaultValue(false);
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+            e.Property(x => x.NextAttemptAt).IsRequired();
+
+            // Publisher poll: unpublished rows in publish order.
+            e.HasIndex(x => new { x.IsPublished, x.CreatedAt })
+                .HasDatabaseName("IX_outbox_events_is_published_created_at");
+
+            // Per-application ordering check: earlier unpublished rows of the same application.
+            e.HasIndex(x => new { x.AggregateId, x.CreatedAt })
+                .HasFilter("NOT \"IsPublished\"")
+                .HasDatabaseName("IX_outbox_events_unpublished_aggregate");
         });
     }
 }
