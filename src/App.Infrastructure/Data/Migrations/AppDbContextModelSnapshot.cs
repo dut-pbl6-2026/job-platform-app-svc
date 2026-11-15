@@ -135,6 +135,56 @@ namespace App.Infrastructure.Data.Migrations
                     b.ToTable("outbox_events", (string)null);
                 });
 
+            modelBuilder.Entity("App.Core.Entities.ScoringJob", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ApplicationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("AttemptCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FailureReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<double?>("Score")
+                        .HasColumnType("double precision");
+
+                    b.Property<DateTime?>("ScoredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ApplicationId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_scoring_jobs_application_id");
+
+                    b.HasIndex("Status", "NextAttemptAt")
+                        .HasDatabaseName("IX_scoring_jobs_status_next_attempt_at");
+
+                    b.ToTable("scoring_jobs", (string)null);
+                });
+
             modelBuilder.Entity("App.Core.Entities.StatusHistory", b =>
                 {
                     b.Property<Guid>("Id")
@@ -173,6 +223,17 @@ namespace App.Infrastructure.Data.Migrations
                     b.ToTable("status_history", (string)null);
                 });
 
+            modelBuilder.Entity("App.Core.Entities.ScoringJob", b =>
+                {
+                    b.HasOne("App.Core.Entities.Application", "Application")
+                        .WithOne("ScoringJob")
+                        .HasForeignKey("App.Core.Entities.ScoringJob", "ApplicationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Application");
+                });
+
             modelBuilder.Entity("App.Core.Entities.StatusHistory", b =>
                 {
                     b.HasOne("App.Core.Entities.Application", "Application")
@@ -186,6 +247,8 @@ namespace App.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("App.Core.Entities.Application", b =>
                 {
+                    b.Navigation("ScoringJob");
+
                     b.Navigation("StatusHistories");
                 });
 #pragma warning restore 612, 618

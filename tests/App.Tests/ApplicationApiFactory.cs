@@ -1,4 +1,5 @@
 using App.Api.Services;
+using App.Core.Interfaces;
 using App.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Hosting;
@@ -21,6 +22,9 @@ public sealed class ApplicationApiFactory : WebApplicationFactory<Program>
     private readonly string _databaseName = "ApiIntegration_" + Guid.NewGuid();
     private readonly string _storageDir = Path.Combine(Path.GetTempPath(), "app_api_it_" + Guid.NewGuid());
     private readonly Func<HttpRequestMessage, HttpResponseMessage> _jobResponder;
+
+    /// <summary>Fake ai-svc. Scoring runs only when a test calls the worker, never in the background.</summary>
+    public FakeResumeScoringClient ScoringClient { get; } = new();
 
     public ApplicationApiFactory(Func<HttpRequestMessage, HttpResponseMessage>? jobResponder = null)
     {
@@ -47,6 +51,9 @@ public sealed class ApplicationApiFactory : WebApplicationFactory<Program>
 
             services.RemoveAll<JobServiceClient>();
             services.AddSingleton(TestJobCompany.WithResponder(_jobResponder));
+
+            services.RemoveAll<IResumeScoringClient>();
+            services.AddSingleton<IResumeScoringClient>(ScoringClient);
         });
     }
 

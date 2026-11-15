@@ -5,7 +5,10 @@ namespace App.Core.DTOs;
 
 public record ApplyJobRequest(Guid JobId, string? CoverLetter);
 
-/// <summary>Detail view for the applicant who submitted the application. Never includes recruiter notes.</summary>
+/// <summary>
+/// Detail view for the applicant who submitted the application. Never includes recruiter notes, the match
+/// score or its status: scoring is visible to recruiters only.
+/// </summary>
 public record ApplicantApplicationDetailDto(
     Guid Id,
     Guid JobId,
@@ -13,7 +16,6 @@ public record ApplicantApplicationDetailDto(
     string? CoverLetter,
     string CvUrl,
     string Status,
-    double? Score,
     DateTime CreatedAt,
     DateTime UpdatedAt,
     IReadOnlyList<StatusHistoryDto> StatusHistory,
@@ -30,6 +32,7 @@ public record RecruiterApplicationDetailDto(
     string Status,
     string? RecruiterNotes,
     double? Score,
+    string? ScoreStatus,
     DateTime CreatedAt,
     DateTime UpdatedAt,
     IReadOnlyList<StatusHistoryDto> StatusHistory,
@@ -43,6 +46,20 @@ public record ApplicationSummaryDto(
     string Status,
     string CvUrl,
     string? CoverLetter,
+    DateTime CreatedAt,
+    DateTime UpdatedAt
+);
+
+/// <summary>Recruiter row for the applications of one job: the summary plus the automatic match score.</summary>
+public record RecruiterApplicationSummaryDto(
+    Guid Id,
+    Guid JobId,
+    Guid ApplicantId,
+    string Status,
+    string CvUrl,
+    string? CoverLetter,
+    double? Score,
+    string? ScoreStatus,
     DateTime CreatedAt,
     DateTime UpdatedAt
 );

@@ -74,6 +74,16 @@ builder.Services.AddSingleton<IKafkaProducer>(sp =>
 // Transactional outbox: application events are written in the same SaveChanges as the change and sent here.
 builder.Services.AddHostedService<OutboxPublisherService>();
 
+// Automatic CV scoring: ai-svc scores each new application against its job (no third-party AI API).
+// The timeout bounds one call; the worker lease (ResumeScoringWorkerService.LeaseDuration) covers a full batch.
+// Registered as a singleton too, so tests can run a scoring cycle directly.
+builder.Services.AddHttpClient<IResumeScoringClient, AiServiceResumeScoringClient>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(60);
+});
+builder.Services.AddSingleton<ResumeScoringWorkerService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<ResumeScoringWorkerService>());
+
 // PBL6-34 / B-10: job-svc HTTP client resolves JobTitle for application events.
 // App-svc has no job read model, so the title is fetched over HTTP before publishing.
 // Best-effort: disabled when JOB_SERVICE_URL is unset; failures publish an empty title.

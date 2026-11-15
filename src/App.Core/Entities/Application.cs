@@ -26,6 +26,9 @@ public class Application : Entity
 
     public ICollection<StatusHistory> StatusHistories { get; private set; } = new List<StatusHistory>();
 
+    /// <summary>Automatic CV scoring for this application. Null only for applications created before scoring existed.</summary>
+    public ScoringJob? ScoringJob { get; private set; }
+
     // EF Core parameterless constructor
     protected Application() { }
 

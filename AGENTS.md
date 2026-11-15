@@ -25,7 +25,14 @@ Dependency: `Api -> Infrastructure -> Core -> SharedKernel` (`PackageReference J
 - `GET /health` - Service healthcheck returning `{"status":"ok","service":"application"}`.
 
 ## Database (app_db)
-- Database schema: `applications`, `status_history`
+- Database schema: `applications`, `status_history`, `outbox_events`, `scoring_jobs`
 - Unique index: `IX_applications_job_applicant_unique` on `(JobId, ApplicantId)`
 - Port: `5004` (gateway upstream `http://localhost:5004`)
-- Env vars: `DATABASE_URL_APP`, `APP_PORT`, `APP_CV_STORAGE_PATH`
+- Env vars: `DATABASE_URL_APP`, `APP_PORT`, `APP_CV_STORAGE_PATH`, `AI_SERVICE_URL` (automatic CV scoring; `Jwt` section for the service token)
+
+## Automatic CV scoring
+- Applying creates one `scoring_jobs` row (Pending) in the same SaveChanges as the application. Nothing else triggers scoring.
+- `ResumeScoringWorkerService` claims due rows with `FOR UPDATE SKIP LOCKED` under a 10-minute lease, reads the CV through `IFileStorageService`, and calls ai-svc `POST /api/ai/score-resume` (`cv_file`, `job_id`). ai-svc fetches the job description itself.
+- Counted failures back off (30 s, doubling, capped at 15 min); after 8 the row is Failed and logged at Error with its id. Rate limit or busy responses are not counted.
+- Recruiters see `score` and `scoreStatus` (pending, done, failed) on the job list and the detail. Applicants never see either. Applications created before scoring have no row: `scoreStatus` is null.
+
