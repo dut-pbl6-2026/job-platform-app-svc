@@ -4,10 +4,11 @@ COPY src/App.Core/App.Core.csproj src/App.Core/
 COPY src/App.Infrastructure/App.Infrastructure.csproj src/App.Infrastructure/
 COPY src/App.Api/App.Api.csproj src/App.Api/
 COPY nuget.config ./
-COPY local-feed/ local-feed/
-RUN dotnet restore src/App.Api/App.Api.csproj
+RUN --mount=type=secret,id=nuget_token,required=true \
+    GITHUB_TOKEN="$(cat /run/secrets/nuget_token)" dotnet restore src/App.Api/App.Api.csproj
 COPY . .
-RUN dotnet publish src/App.Api/App.Api.csproj -c Release -o /app/publish
+RUN --mount=type=secret,id=nuget_token,required=true \
+    GITHUB_TOKEN="$(cat /run/secrets/nuget_token)" dotnet publish src/App.Api/App.Api.csproj -c Release -o /app/publish
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
