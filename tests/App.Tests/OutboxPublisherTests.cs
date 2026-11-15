@@ -167,8 +167,13 @@ public class OutboxPublisherTests : IDisposable
         await AddRowAsync(ApplicationOutboxEvents.StatusChanged(app, "Pending", Guid.NewGuid(), "Title"));
         _producer.FailuresRemaining = 1;
 
-        await _publisher.PublishPendingAsync(CancellationToken.None);
-        await MakeDueAsync(submitted); // earlier row becomes due, the later row is still behind it
+        await _publisher.PublishPendingAsync(CancellationToken.None); // submitted fails and backs off
+        await _publisher.PublishPendingAsync(CancellationToken.None); // submitted not due; status must stay blocked
+
+        Assert.Equal(1, _producer.Attempts);
+        Assert.Empty(_producer.SentEventTypes);
+
+        await MakeDueAsync(submitted);
         _producer.FailuresRemaining = 0;
         await _publisher.PublishPendingAsync(CancellationToken.None);
         await _publisher.PublishPendingAsync(CancellationToken.None);

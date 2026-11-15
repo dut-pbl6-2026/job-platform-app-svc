@@ -23,7 +23,8 @@ namespace App.Infrastructure.Workers;
 ///    exponential backoff. Rows that were not attempted are released at once.
 ///
 /// Delivery is at-least-once: a crash after the acknowledgement and before the mark republishes the row
-/// when its lease ends. Consumers already deduplicate on EventId.
+/// when its lease ends, with the same EventId. notif-svc deduplicates notifications on
+/// (application, event type, status), so a republished event does not send a second email.
 /// A row is never dropped. Rows that keep failing are logged at Error with their id.
 /// Ordering: a row waits while an earlier unpublished row of the same application exists.
 /// </summary>
