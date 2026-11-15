@@ -26,6 +26,7 @@ Dependency: `Api -> Infrastructure -> Core -> SharedKernel` (`PackageReference J
 
 ## Database (app_db)
 - Database schema: `applications`, `status_history`, `outbox_events`, `scoring_jobs`
+- Schema migration is a separate deploy step: `dotnet App.Api.dll migrate` (`Bootstrap/MigrateCommand.cs`, compose service `app-migrate`). The web host never migrates on startup.
 - Unique index: `IX_applications_job_applicant_unique` on `(JobId, ApplicantId)`
 - Port: `5004` (gateway upstream `http://localhost:5004`)
 - Env vars: `DATABASE_URL_APP`, `APP_PORT`, `APP_CV_STORAGE_PATH`, `AI_SERVICE_URL` and `AI_SCORING_SERVICE_TOKEN` (automatic CV scoring; the worker stays disabled until both are set; Production refuses a token shorter than 32 characters)
