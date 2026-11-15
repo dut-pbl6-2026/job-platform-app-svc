@@ -119,34 +119,10 @@ builder.Services.AddHttpClient<JobServiceClient>(client =>
     client.Timeout = TimeSpan.FromSeconds(5);
 });
 
-// Auth config
+// Auth config: RS256 access tokens from auth-svc, keys from its JWKS (Jwt__MetadataAddress). No shared secret.
 if (!builder.Environment.IsDevelopment())
 {
-    var jwtSection = builder.Configuration.GetSection(JwtOptions.SectionName);
-    var jwt = jwtSection.Get<JwtOptions>() ?? new JwtOptions();
-
-    if (string.IsNullOrEmpty(jwt.Secret) || jwt.Secret.Length < 32)
-    {
-        throw new InvalidOperationException(
-            "JWT secret not configured or too short. Set JWT_SECRET env var (min 32 chars).");
-    }
-
-    builder.Services
-        .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-        .AddJwtBearer(o =>
-        {
-            o.TokenValidationParameters = new TokenValidationParameters
-            {
-                ValidateIssuer = true,
-                ValidateAudience = true,
-                ValidateLifetime = true,
-                ValidateIssuerSigningKey = true,
-                ValidIssuer = jwt.Issuer,
-                ValidAudience = jwt.Audience,
-                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt.Secret)),
-                ClockSkew = TimeSpan.Zero
-            };
-        });
+    builder.Services.AddRs256JwtBearer(builder.Configuration);
     builder.Services.AddAuthorization();
 }
 
