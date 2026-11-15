@@ -28,6 +28,13 @@ internal static class TestJobCompany
     public static JobServiceClient WithJobStatus(string jobStatus) =>
         Create(_ => Json(HttpStatusCode.OK, CompanyId, jobStatus));
 
+    /// <summary>Raw job-svc response for an Active job owned by <see cref="CompanyId"/>, for responders that wrap it.</summary>
+    public static HttpResponseMessage OwnedJobResponse(string jobStatus = "Active") =>
+        Json(HttpStatusCode.OK, CompanyId, jobStatus);
+
+    /// <summary>Client built from a custom responder, for tests that intercept job-svc calls.</summary>
+    public static JobServiceClient WithResponder(Func<HttpRequestMessage, HttpResponseMessage> responder) => Create(responder);
+
     /// <summary>Client whose job-svc responds with a server error, to test fail-closed behaviour.</summary>
     public static JobServiceClient Down() => Create(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
 

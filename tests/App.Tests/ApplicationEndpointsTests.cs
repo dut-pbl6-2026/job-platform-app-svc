@@ -272,15 +272,16 @@ public class ApplicationEndpointsTests : IDisposable
         Assert.Equal(200, statusCodeResult.StatusCode);
 
         var valueResult = result as IValueHttpResult;
-        var detail = valueResult?.Value as ApplicationDetailDto;
+        var detail = valueResult?.Value as ApplicantApplicationDetailDto;
         Assert.NotNull(detail);
         Assert.Equal(app.Id, detail.Id);
         Assert.Equal("Cover letter text", detail.CoverLetter);
 
-        // Recruiter can access
+        // Recruiter can access and receives the recruiter view
         var recruiterCtx = BuildContext(_recruiterId, "Recruiter");
         var recruiterResult = await ApplicationEndpoints.GetApplicationById(app.Id, _db, recruiterCtx, jobClient: _jobClient);
         Assert.Equal(200, (recruiterResult as IStatusCodeHttpResult)?.StatusCode);
+        Assert.IsType<RecruiterApplicationDetailDto>((recruiterResult as IValueHttpResult)?.Value);
 
         // Unauthorized user cannot access (403)
         var unauthorizedCtx = BuildContext(_otherUserId, "User");
@@ -828,5 +829,40 @@ public class ApplicationEndpointsTests : IDisposable
         {
             throw new DbUpdateException("Duplicate key violation on IX_applications_job_applicant_unique", new Exception());
         }
+    }
+
+    [Fact]
+    public async Task GetMyApplications_OverflowingPage_Returns400NotServerError()
+    {
+        var ctx = BuildContext(_applicantId, "User");
+
+        var result = await ApplicationEndpoints.GetMyApplications(null, 30000001, 100, _db, ctx);
+
+        Assert.Equal(400, (result as IStatusCodeHttpResult)?.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetApplicationsByJobId_OverflowingPage_Returns400NotServerError()
+    {
+        var ctx = BuildContext(_recruiterId, "Recruiter");
+
+        var result = await ApplicationEndpoints.GetApplicationsByJobId(_jobId, null, 30000001, 100, _db, ctx, _jobClient);
+
+        Assert.Equal(400, (result as IStatusCodeHttpResult)?.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetApplicationById_OwnerWithRecruiterRole_GetsApplicantViewWithoutRecruiterNotes()
+    {
+        // A user who applied is the owner; their role claim must not expose internal recruiter notes.
+        var app = new Application(_jobId, _applicantId, "/cv.pdf");
+        app.SetRecruiterNotes("Internal: do not share");
+        _db.Applications.Add(app);
+        await _db.SaveChangesAsync();
+
+        var ctx = BuildContext(_applicantId, "Recruiter");
+        var result = await ApplicationEndpoints.GetApplicationById(app.Id, _db, ctx, jobClient: _jobClient);
+
+        Assert.IsType<ApplicantApplicationDetailDto>((result as IValueHttpResult)?.Value);
     }
 }

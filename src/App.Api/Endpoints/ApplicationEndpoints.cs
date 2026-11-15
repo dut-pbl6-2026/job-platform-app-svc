@@ -271,8 +271,15 @@ public static class ApplicationEndpoints
         if (userId is null)
             return UnauthorizedResult();
 
-        var pageIndex = Math.Max(0, (page ?? 0) > 0 ? (page!.Value - 1) : 0);
-        var pageSize = Math.Clamp(size ?? 20, 1, 100);
+        var pageNumber = page ?? PageRules.DefaultPage;
+        var pageSize = size ?? PageRules.DefaultSize;
+        var pageErrors = PageRules.Validate(pageNumber, pageSize);
+        if (pageErrors.Count > 0)
+        {
+            return Results.ValidationProblem(pageErrors);
+        }
+
+        var pageIndex = pageNumber - 1;
 
         var query = db.Applications.AsNoTracking().Where(a => a.ApplicantId == userId.Value);
 
@@ -360,7 +367,25 @@ public static class ApplicationEndpoints
             .Select(s => s.ToString().ToLowerInvariant())
             .ToList();
 
-        var detail = new ApplicationDetailDto(
+        // The applicant sees their own application without recruiter-internal notes. Recruiters and admins
+        // see the full record. The owner always gets the applicant view, even if their role is Recruiter.
+        if (isOwner)
+        {
+            return Results.Ok(new ApplicantApplicationDetailDto(
+                app.Id,
+                app.JobId,
+                app.ApplicantId,
+                app.CoverLetter,
+                app.CvUrl,
+                app.Status.ToString().ToLowerInvariant(),
+                app.Score,
+                app.CreatedAt,
+                app.UpdatedAt,
+                historyDtos,
+                nextAllowed));
+        }
+
+        return Results.Ok(new RecruiterApplicationDetailDto(
             app.Id,
             app.JobId,
             app.ApplicantId,
@@ -372,9 +397,7 @@ public static class ApplicationEndpoints
             app.CreatedAt,
             app.UpdatedAt,
             historyDtos,
-            nextAllowed);
-
-        return Results.Ok(detail);
+            nextAllowed));
     }
 
     /// <summary>
@@ -519,8 +542,15 @@ public static class ApplicationEndpoints
         var jobDenied = await EnsureRecruiterOwnsJobAsync(ctx, role, jobId, jobClient);
         if (jobDenied is not null) return jobDenied;
 
-        var pageIndex = Math.Max(0, (page ?? 0) > 0 ? (page!.Value - 1) : 0);
-        var pageSize = Math.Clamp(size ?? 20, 1, 100);
+        var pageNumber = page ?? PageRules.DefaultPage;
+        var pageSize = size ?? PageRules.DefaultSize;
+        var pageErrors = PageRules.Validate(pageNumber, pageSize);
+        if (pageErrors.Count > 0)
+        {
+            return Results.ValidationProblem(pageErrors);
+        }
+
+        var pageIndex = pageNumber - 1;
 
         var query = db.Applications.AsNoTracking().Where(a => a.JobId == jobId);
 

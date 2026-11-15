@@ -18,6 +18,12 @@ public class Application : Entity
     public string? RecruiterNotes { get; private set; }
     public double? Score { get; private set; }
 
+    /// <summary>
+    /// Optimistic concurrency token. Incremented on every change to the aggregate, so two writers that
+    /// loaded the same version cannot both commit (the loser gets DbUpdateConcurrencyException).
+    /// </summary>
+    public int RowVersion { get; private set; }
+
     public ICollection<StatusHistory> StatusHistories { get; private set; } = new List<StatusHistory>();
 
     // EF Core parameterless constructor
@@ -57,6 +63,12 @@ public class Application : Entity
         return AllowedTransitions.TryGetValue(Status, out var allowed) && allowed.Contains(newStatus);
     }
 
+    private void MarkChanged()
+    {
+        Touch();
+        RowVersion++;
+    }
+
     public IReadOnlyList<ApplicationStatus> GetAllowedTransitions()
     {
         return AllowedTransitions.TryGetValue(Status, out var allowed) ? allowed : Array.Empty<ApplicationStatus>();
@@ -78,7 +90,7 @@ public class Application : Entity
         }
 
         Status = newStatus;
-        Touch();
+        MarkChanged();
         var history = new StatusHistory(Id, newStatus, changedBy, note);
         StatusHistories.Add(history);
         return history;
@@ -90,7 +102,7 @@ public class Application : Entity
             throw new ArgumentException($"Recruiter notes cannot exceed {RecruiterNotesMaxLength} characters.", nameof(notes));
 
         RecruiterNotes = notes?.Trim();
-        Touch();
+        MarkChanged();
     }
 
     public void SetScore(double? score)
@@ -99,6 +111,6 @@ public class Application : Entity
             throw new ArgumentOutOfRangeException(nameof(score), $"Score must be between {MinScore} and {MaxScore}.");
 
         Score = score;
-        Touch();
+        MarkChanged();
     }
 }

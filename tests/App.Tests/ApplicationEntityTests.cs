@@ -235,4 +235,88 @@ public class ApplicationEntityTests
         app.SetScore(null);
         Assert.Null(app.Score);
     }
+
+    // Full transition matrix, written out from the SRS state machine (pending -> reviewed -> shortlisted ->
+    // accepted, rejected from any non-terminal stage). Every ordered pair is checked, not just a sample.
+    public static IEnumerable<object[]> AllStatusPairs()
+    {
+        var all = Enum.GetValues<ApplicationStatus>();
+        foreach (var from in all)
+            foreach (var to in all)
+                yield return new object[] { from, to };
+    }
+
+    [Theory]
+    [MemberData(nameof(AllStatusPairs))]
+    public void StatusFlow_TransitionMatrix_MatchesSrsStateMachine(ApplicationStatus from, ApplicationStatus to)
+    {
+        var expected = new HashSet<(ApplicationStatus, ApplicationStatus)>
+        {
+            (ApplicationStatus.Pending, ApplicationStatus.Reviewed),
+            (ApplicationStatus.Pending, ApplicationStatus.Rejected),
+            (ApplicationStatus.Reviewed, ApplicationStatus.Shortlisted),
+            (ApplicationStatus.Reviewed, ApplicationStatus.Rejected),
+            (ApplicationStatus.Shortlisted, ApplicationStatus.Accepted),
+            (ApplicationStatus.Shortlisted, ApplicationStatus.Rejected),
+        };
+
+        var app = NewApplicationAt(from);
+        var recruiterId = Guid.NewGuid();
+
+        if (expected.Contains((from, to)))
+        {
+            Assert.True(app.CanTransitionTo(to));
+            app.UpdateStatus(to, recruiterId);
+            Assert.Equal(to, app.Status);
+        }
+        else
+        {
+            Assert.False(app.CanTransitionTo(to));
+            Assert.Throws<InvalidOperationException>(() => app.UpdateStatus(to, recruiterId));
+            Assert.Equal(from, app.Status);
+        }
+    }
+
+    [Fact]
+    public void RowVersion_IncrementsOnEveryAggregateChange()
+    {
+        var app = new Application(Guid.NewGuid(), Guid.NewGuid(), "/cv.pdf");
+        var recruiterId = Guid.NewGuid();
+        Assert.Equal(0, app.RowVersion);
+
+        app.UpdateStatus(ApplicationStatus.Reviewed, recruiterId);
+        Assert.Equal(1, app.RowVersion);
+
+        app.SetRecruiterNotes("Strong portfolio");
+        Assert.Equal(2, app.RowVersion);
+
+        app.SetScore(80);
+        Assert.Equal(3, app.RowVersion);
+    }
+
+    [Fact]
+    public void RowVersion_NotIncrementedWhenTransitionIsRejected()
+    {
+        var app = new Application(Guid.NewGuid(), Guid.NewGuid(), "/cv.pdf");
+
+        Assert.Throws<InvalidOperationException>(() => app.UpdateStatus(ApplicationStatus.Accepted, Guid.NewGuid()));
+        Assert.Equal(0, app.RowVersion);
+    }
+
+    private static Application NewApplicationAt(ApplicationStatus status)
+    {
+        var app = new Application(Guid.NewGuid(), Guid.NewGuid(), "/cv.pdf");
+        var recruiterId = Guid.NewGuid();
+        var path = status switch
+        {
+            ApplicationStatus.Pending => Array.Empty<ApplicationStatus>(),
+            ApplicationStatus.Reviewed => new[] { ApplicationStatus.Reviewed },
+            ApplicationStatus.Shortlisted => new[] { ApplicationStatus.Reviewed, ApplicationStatus.Shortlisted },
+            ApplicationStatus.Accepted => new[] { ApplicationStatus.Reviewed, ApplicationStatus.Shortlisted, ApplicationStatus.Accepted },
+            _ => new[] { ApplicationStatus.Rejected },
+        };
+        foreach (var step in path)
+            app.UpdateStatus(step, recruiterId);
+        return app;
+    }
 }
