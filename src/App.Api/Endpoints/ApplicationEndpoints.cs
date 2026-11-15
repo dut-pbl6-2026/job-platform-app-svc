@@ -218,6 +218,8 @@ public static class ApplicationEndpoints
         db.Applications.Add(application);
         // Same SaveChanges as the application row: the event commits with the application or not at all.
         db.OutboxEvents.Add(ApplicationOutboxEvents.Submitted(application, job!.Title));
+        // Automatic CV scoring: a pending job the background worker claims. Same SaveChanges, so it exists iff the application does.
+        db.ScoringJobs.Add(new ScoringJob(application.Id, DateTime.UtcNow));
 
         try
         {
@@ -329,6 +331,7 @@ public static class ApplicationEndpoints
 
         var app = await db.Applications
             .Include(a => a.StatusHistories)
+            .Include(a => a.ScoringJob)
             .AsNoTracking()
             .FirstOrDefaultAsync(a => a.Id == id);
 
@@ -374,7 +377,6 @@ public static class ApplicationEndpoints
                 app.CoverLetter,
                 app.CvUrl,
                 app.Status.ToString().ToLowerInvariant(),
-                app.Score,
                 app.CreatedAt,
                 app.UpdatedAt,
                 historyDtos,
@@ -389,7 +391,8 @@ public static class ApplicationEndpoints
             app.CvUrl,
             app.Status.ToString().ToLowerInvariant(),
             app.RecruiterNotes,
-            app.Score,
+            app.ScoringJob?.Score,
+            ToScoreStatus(app.ScoringJob?.Status),
             app.CreatedAt,
             app.UpdatedAt,
             historyDtos,
@@ -566,22 +569,40 @@ public static class ApplicationEndpoints
         }
 
         var total = await query.CountAsync();
-        var items = await query
+        var rows = await query
             .OrderByDescending(a => a.CreatedAt)
             .Skip(pageIndex * pageSize)
             .Take(pageSize)
-            .Select(a => new ApplicationSummaryDto(
+            .Select(a => new
+            {
                 a.Id,
                 a.JobId,
                 a.ApplicantId,
-                a.Status.ToString().ToLowerInvariant(),
+                a.Status,
                 a.CvUrl,
                 a.CoverLetter,
                 a.CreatedAt,
-                a.UpdatedAt))
+                a.UpdatedAt,
+                ScoringStatus = (ScoringStatus?)a.ScoringJob!.Status,
+                Score = a.ScoringJob!.Score,
+            })
             .ToListAsync();
 
-        return Results.Ok(new PaginatedResponse<ApplicationSummaryDto>(items, total, pageIndex + 1, pageSize));
+        var items = rows
+            .Select(r => new RecruiterApplicationSummaryDto(
+                r.Id,
+                r.JobId,
+                r.ApplicantId,
+                r.Status.ToString().ToLowerInvariant(),
+                r.CvUrl,
+                r.CoverLetter,
+                r.Score,
+                ToScoreStatus(r.ScoringStatus),
+                r.CreatedAt,
+                r.UpdatedAt))
+            .ToList();
+
+        return Results.Ok(new PaginatedResponse<RecruiterApplicationSummaryDto>(items, total, pageIndex + 1, pageSize));
     }
 
     /// <summary>
@@ -755,6 +776,10 @@ public static class ApplicationEndpoints
             contentType: result.Value.ContentType,
             fileDownloadName: result.Value.FileName);
     }
+
+    /// <summary>Wire value of the scoring status (pending, done, failed). Null when the application has no scoring job.</summary>
+    private static string? ToScoreStatus(ScoringStatus? status) =>
+        status?.ToString().ToLowerInvariant();
 
     private static bool IsUniqueConstraintViolation(DbUpdateException ex, string? constraintName = null)
     {

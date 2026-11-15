@@ -10,6 +10,7 @@ public class AppDbContext : DbContext
     public DbSet<Application> Applications => Set<Application>();
     public DbSet<StatusHistory> StatusHistories => Set<StatusHistory>();
     public DbSet<OutboxEvent> OutboxEvents => Set<OutboxEvent>();
+    public DbSet<ScoringJob> ScoringJobs => Set<ScoringJob>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -70,6 +71,40 @@ public class AppDbContext : DbContext
                 .HasMaxLength(32);
 
             e.HasIndex(x => x.ApplicationId).HasDatabaseName("IX_status_history_application_id");
+        });
+
+        b.Entity<ScoringJob>(e =>
+        {
+            e.ToTable("scoring_jobs");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+
+            e.Property(x => x.ApplicationId).IsRequired();
+            e.Property(x => x.Status)
+                .HasConversion<string>()
+                .HasMaxLength(16)
+                .IsRequired();
+            e.Property(x => x.Score);
+            e.Property(x => x.ScoredAt);
+            e.Property(x => x.FailureReason).HasMaxLength(ScoringJob.FailureReasonMaxLength);
+            e.Property(x => x.AttemptCount).HasDefaultValue(0).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+            e.Property(x => x.NextAttemptAt).IsRequired();
+
+            // One scoring job per application.
+            e.HasIndex(x => x.ApplicationId)
+                .IsUnique()
+                .HasDatabaseName("IX_scoring_jobs_application_id");
+
+            // Worker claim: pending rows in due order.
+            e.HasIndex(x => new { x.Status, x.NextAttemptAt })
+                .HasDatabaseName("IX_scoring_jobs_status_next_attempt_at");
+
+            e.HasOne(x => x.Application)
+                .WithOne(x => x.ScoringJob)
+                .HasForeignKey<ScoringJob>(x => x.ApplicationId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<OutboxEvent>(e =>

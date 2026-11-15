@@ -21,11 +21,18 @@ public class ApplicationContractTests
 
     private static ApplicantApplicationDetailDto SampleApplicantView() => new(
         Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "cover", "/cv.pdf", "pending",
-        Score: 72.5, DateTime.UtcNow, DateTime.UtcNow, [], ["reviewed", "rejected"]);
+        DateTime.UtcNow, DateTime.UtcNow, [], ["reviewed", "rejected"]);
 
     private static RecruiterApplicationDetailDto SampleRecruiterView() => new(
         Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "cover", "/cv.pdf", "pending",
-        RecruiterNotes: "internal", Score: 72.5, DateTime.UtcNow, DateTime.UtcNow, [], ["reviewed"]);
+        RecruiterNotes: "internal", Score: 72.5, ScoreStatus: "done", DateTime.UtcNow, DateTime.UtcNow, [], ["reviewed"]);
+
+    private static ApplicationSummaryDto SampleApplicantSummary() => new(
+        Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "pending", "/cv.pdf", "cover", DateTime.UtcNow, DateTime.UtcNow);
+
+    private static RecruiterApplicationSummaryDto SampleRecruiterSummary() => new(
+        Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "pending", "/cv.pdf", "cover",
+        Score: 61, ScoreStatus: "pending", DateTime.UtcNow, DateTime.UtcNow);
 
     [Fact]
     public void ApplicantView_TypeHasNoRecruiterNotesProperty()
@@ -34,42 +41,73 @@ public class ApplicationContractTests
     }
 
     [Fact]
-    public void RecruiterView_TypeExposesRecruiterNotesAndScore()
+    public void RecruiterView_TypeExposesRecruiterNotesAndScoreFields()
     {
         var names = PropertyNames(typeof(RecruiterApplicationDetailDto));
         Assert.Contains("RecruiterNotes", names);
         Assert.Contains("Score", names);
+        Assert.Contains("ScoreStatus", names);
     }
 
     [Fact]
-    public void ApplicantView_HasExactlyTheRecruiterFieldsMinusRecruiterNotes()
+    public void ApplicantView_TypeHasNoScoreFields()
+    {
+        var names = PropertyNames(typeof(ApplicantApplicationDetailDto));
+        Assert.DoesNotContain("Score", names);
+        Assert.DoesNotContain("ScoreStatus", names);
+    }
+
+    [Fact]
+    public void ApplicantView_HasExactlyTheRecruiterFieldsMinusNotesAndScoring()
     {
         var applicant = PropertyNames(typeof(ApplicantApplicationDetailDto));
         var recruiter = PropertyNames(typeof(RecruiterApplicationDetailDto));
 
-        Assert.Equal(recruiter.Where(n => n != "RecruiterNotes"), applicant);
+        Assert.Equal(recruiter.Where(n => n is not ("RecruiterNotes" or "Score" or "ScoreStatus")), applicant);
     }
 
     [Fact]
-    public void ApplicantJson_OmitsRecruiterNotes_ButKeepsOtherFields()
+    public void ApplicantJson_OmitsRecruiterNotesAndScoring_ButKeepsOtherFields()
     {
         var keys = JsonKeys(SampleApplicantView());
 
         Assert.DoesNotContain("recruiterNotes", keys);
+        Assert.DoesNotContain("score", keys);
+        Assert.DoesNotContain("scoreStatus", keys);
         Assert.True(keys.SetEquals(new[]
         {
-            "id", "jobId", "applicantId", "coverLetter", "cvUrl", "status", "score",
+            "id", "jobId", "applicantId", "coverLetter", "cvUrl", "status",
             "createdAt", "updatedAt", "statusHistory", "nextAllowedStatuses",
         }));
     }
 
     [Fact]
-    public void RecruiterJson_IncludesRecruiterNotes()
+    public void ApplicantSummaryJson_HasNoScoreFields()
+    {
+        var keys = JsonKeys(SampleApplicantSummary());
+
+        Assert.DoesNotContain("score", keys);
+        Assert.DoesNotContain("scoreStatus", keys);
+    }
+
+    [Fact]
+    public void RecruiterJson_IncludesRecruiterNotesScoreAndScoreStatus()
     {
         var keys = JsonKeys(SampleRecruiterView());
 
         Assert.Contains("recruiterNotes", keys);
         Assert.Contains("score", keys);
+        Assert.Contains("scoreStatus", keys);
+    }
+
+    [Fact]
+    public void RecruiterSummaryJson_IncludesScoreAndScoreStatus()
+    {
+        var keys = JsonKeys(SampleRecruiterSummary());
+
+        Assert.Contains("score", keys);
+        Assert.Contains("scoreStatus", keys);
+        Assert.DoesNotContain("recruiterNotes", keys);
     }
 
     [Fact]
