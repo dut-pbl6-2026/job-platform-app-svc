@@ -1,4 +1,5 @@
 using System.Text;
+using App.Api.Bootstrap;
 using App.Api.Endpoints;
 using App.Api.Middleware;
 using App.Api.Observability;
@@ -47,6 +48,11 @@ if (string.IsNullOrWhiteSpace(conn))
             "Database connection string is not configured. Set DATABASE_URL_APP environment variable or ConnectionStrings:AppDb.");
     }
 }
+
+// Schema migration is a separate deploy step: `migrate` applies pending migrations and exits.
+// The web host never migrates on startup.
+if (MigrateCommand.IsInvoked(args))
+    return await MigrateCommand.RunAsync(args, conn, Console.Out, Console.Error);
 
 builder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(conn));
 builder.Services.AddServiceHealthChecks<AppDbContext>(builder.Configuration, kafka: true);
@@ -196,31 +202,9 @@ app.MapApplicationEndpoints();
 app.MapInternalStatsEndpoints();
 app.MapInternalApplicationsEndpoints();
 
-// Auto-migrate on startup if database is available
-using (var scope = app.Services.CreateScope())
-{
-    var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-    try
-    {
-        if (db.Database.IsRelational())
-        {
-            await db.Database.MigrateAsync();
-            logger.LogInformation("Database migrated successfully.");
-        }
-    }
-    catch (Exception ex)
-    {
-        logger.LogWarning(ex, "Could not run DB migrations at startup. If running without Postgres, verify connection.");
-        if (!app.Environment.IsDevelopment())
-        {
-            throw;
-        }
-    }
-}
-
 app.Run();
+
+return 0;
 
 // For WebApplicationFactory in tests
 public partial class Program { }
