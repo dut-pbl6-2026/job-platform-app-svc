@@ -178,7 +178,8 @@ public sealed class InternalApplicationsEndpointTests : IDisposable
             application.Id,
             new UpdateStatusRequest("rejected", "Not a fit"),
             _db,
-            UserContext(Guid.NewGuid(), "Recruiter"));
+            UserContext(Guid.NewGuid(), "Recruiter"),
+            jobClient: TestJobCompany.Owned());
         Assert.Equal(200, StatusOf(rejected));
 
         var result = await Invoke(Authorized($"Bearer {Token}"));
@@ -253,9 +254,14 @@ public sealed class InternalApplicationsEndpointTests : IDisposable
     private static HttpContext UserContext(Guid userId, string role)
     {
         var ctx = new DefaultHttpContext();
-        ctx.User = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.NameIdentifier, userId.ToString()), new Claim(ClaimTypes.Role, role)],
-            "TestAuth"));
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, userId.ToString()),
+            new(ClaimTypes.Role, role),
+        };
+        if (role == "Recruiter")
+            claims.Add(new Claim("company_id", TestJobCompany.CompanyId.ToString()));
+        ctx.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
         ctx.Request.Headers["X-User-Id"] = userId.ToString();
         ctx.Request.Headers["X-User-Role"] = role;
         return ctx;
