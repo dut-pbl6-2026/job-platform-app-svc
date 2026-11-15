@@ -85,6 +85,56 @@ namespace App.Infrastructure.Data.Migrations
                     b.ToTable("applications", (string)null);
                 });
 
+            modelBuilder.Entity("App.Core.Entities.OutboxEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AggregateId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<bool>("IsPublished")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<DateTime>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("PublishedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("RetryCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AggregateId", "CreatedAt")
+                        .HasDatabaseName("IX_outbox_events_unpublished_aggregate")
+                        .HasFilter("NOT \"IsPublished\"");
+
+                    b.HasIndex("IsPublished", "CreatedAt")
+                        .HasDatabaseName("IX_outbox_events_is_published_created_at");
+
+                    b.ToTable("outbox_events", (string)null);
+                });
+
             modelBuilder.Entity("App.Core.Entities.StatusHistory", b =>
                 {
                     b.Property<Guid>("Id")

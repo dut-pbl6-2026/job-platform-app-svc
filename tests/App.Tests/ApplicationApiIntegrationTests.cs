@@ -218,4 +218,29 @@ public class ApplicationApiIntegrationTests : IDisposable
         await Task.WhenAll(a, b);
         return (a.Result, b.Result);
     }
+
+    [Fact]
+    public async Task ApplyThenStatusChange_OverHttp_WritesSubmittedThenStatusChangedRows()
+    {
+        var jobId = Guid.NewGuid();
+        var applicantId = Guid.NewGuid();
+        var factory = NewFactory();
+        var applicant = As(factory, applicantId, "User");
+        var recruiter = As(factory, Guid.NewGuid(), "Recruiter", linkedToOwnedCompany: true);
+
+        var apply = await applicant.PostAsync("/api/applications", ApplyForm(jobId));
+        Assert.Equal(HttpStatusCode.Created, apply.StatusCode);
+        var applicationId = (await apply.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        var update = await recruiter.PutAsJsonAsync($"/api/applications/{applicationId}/status", new { status = "reviewed" });
+        Assert.Equal(HttpStatusCode.OK, update.StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var rows = await db.OutboxEvents.AsNoTracking().OrderBy(e => e.CreatedAt).ToListAsync();
+        Assert.Equal(
+            new[] { SharedKernel.Events.ApplicationEventTypes.Submitted, SharedKernel.Events.ApplicationEventTypes.StatusChanged },
+            rows.Select(r => r.EventType));
+        Assert.All(rows, r => Assert.Equal(applicationId, r.AggregateId));
+    }
 }
