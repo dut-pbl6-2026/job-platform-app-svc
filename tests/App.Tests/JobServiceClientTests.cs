@@ -147,7 +147,7 @@ public class JobServiceClientTests
     {
         var values = new Dictionary<string, string?> { ["JOB_SERVICE_URL"] = baseUrl };
         if (token is not null)
-            values["INTERNAL_SERVICE_TOKEN"] = token;
+            values["JOB_INTERNAL_TOKEN_FOR_APP"] = token;
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(values)
             .Build();

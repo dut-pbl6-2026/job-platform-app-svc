@@ -29,7 +29,7 @@ Dependency: `Api -> Infrastructure -> Core -> SharedKernel` (`PackageReference J
 - Schema migration is a separate deploy step: `dotnet App.Api.dll migrate` (`Bootstrap/MigrateCommand.cs`, compose service `app-migrate`). The web host never migrates on startup.
 - Unique index: `IX_applications_job_applicant_unique` on `(JobId, ApplicantId)`
 - Port: `5004` (gateway upstream `http://localhost:5004`)
-- Env vars: `DATABASE_URL_APP`, `APP_PORT`, `APP_CV_STORAGE_PATH`, `AI_SERVICE_URL` and `AI_SCORING_SERVICE_TOKEN` (automatic CV scoring; the worker stays disabled until both are set; Production refuses a token shorter than 32 characters)
+- Env vars: `APP_INTERNAL_TOKEN_FOR_JOB`, `APP_INTERNAL_TOKEN_FOR_AUTH`, `JOB_INTERNAL_TOKEN_FOR_APP` (per-caller internal tokens), `DATABASE_URL_APP`, `APP_PORT`, `APP_CV_STORAGE_PATH`, `AI_SERVICE_URL` and `AI_SCORING_SERVICE_TOKEN` (automatic CV scoring; the worker stays disabled until both are set; Production refuses a token shorter than 32 characters)
 
 ## Automatic CV scoring
 - Applying creates one `scoring_jobs` row (Pending) in the same SaveChanges as the application. Nothing else triggers scoring.
