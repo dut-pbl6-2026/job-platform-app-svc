@@ -19,12 +19,14 @@ public class JobServiceClient
 
     private readonly HttpClient _http;
     private readonly string _baseUrl;
+    private readonly string _internalToken;
     private readonly ILogger<JobServiceClient> _logger;
 
     public JobServiceClient(HttpClient http, IConfiguration configuration, ILogger<JobServiceClient> logger)
     {
         _http = http;
         _baseUrl = (configuration["JOB_SERVICE_URL"] ?? configuration["JobService:Url"] ?? "").Trim().TrimEnd('/');
+        _internalToken = (configuration["INTERNAL_SERVICE_TOKEN"] ?? "").Trim();
         _logger = logger;
     }
 
@@ -72,14 +74,18 @@ public class JobServiceClient
     /// </summary>
     public async Task<(JobCompanyLookupStatus Status, Guid? CompanyId)> GetJobCompanyAsync(Guid jobId, CancellationToken ct = default)
     {
-        if (!Enabled)
+        // Fail closed: no job-svc URL or no internal token means no ownership can be proven.
+        if (!Enabled || string.IsNullOrEmpty(_internalToken))
         {
             return (JobCompanyLookupStatus.Unavailable, null);
         }
 
         try
         {
-            using var response = await _http.GetAsync($"{_baseUrl}/api/jobs/{jobId}", ct);
+            // Internal endpoint: sees Pending/Rejected jobs that the public GET hides.
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"{_baseUrl}/api/internal/jobs/{jobId}/company");
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _internalToken);
+            using var response = await _http.SendAsync(request, ct);
             if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
                 return (JobCompanyLookupStatus.NotFound, null);

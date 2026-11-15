@@ -54,12 +54,28 @@ internal static class TestJobCompany
                 Encoding.UTF8, "application/json"),
         };
 
-    private static JobServiceClient Create(Func<HttpRequestMessage, HttpResponseMessage> responder)
+    /// <summary>Owned-by-<see cref="CompanyId"/> client that has NO internal token configured.</summary>
+    public static JobServiceClient NoInternalToken() => Create(_ => Json(HttpStatusCode.OK, CompanyId), token: null);
+
+    /// <summary>Client that records the Authorization header of the last request it received.</summary>
+    public static (JobServiceClient Client, Func<string?> LastAuthorization) Recording()
+    {
+        string? last = null;
+        var client = Create(req =>
+        {
+            last = req.Headers.Authorization?.ToString();
+            return Json(HttpStatusCode.OK, CompanyId);
+        });
+        return (client, () => last);
+    }
+
+    private static JobServiceClient Create(Func<HttpRequestMessage, HttpResponseMessage> responder, string? token = "test-internal-token")
     {
         var handler = new FakeJobHandler(responder);
-        var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> { ["JOB_SERVICE_URL"] = "http://job.test" })
-            .Build();
+        var values = new Dictionary<string, string?> { ["JOB_SERVICE_URL"] = "http://job.test" };
+        if (token is not null)
+            values["INTERNAL_SERVICE_TOKEN"] = token;
+        var config = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
         return new JobServiceClient(new HttpClient(handler), config, NullLogger<JobServiceClient>.Instance);
     }
 
