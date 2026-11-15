@@ -1,12 +1,7 @@
-using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Headers;
-using System.Security.Claims;
-using System.Text;
 using System.Text.Json;
 using App.Core.Interfaces;
-using Microsoft.IdentityModel.Tokens;
-using SharedKernel;
 
 namespace App.Api.Services;
 
@@ -15,37 +10,30 @@ namespace App.Api.Services;
 /// <c>overall_score</c>. ai-svc loads the job description itself from job-svc by <c>job_id</c>, so no job text
 /// is sent from here.
 ///
-/// ai-svc authenticates the caller with a user JWT (HS256, the platform's shared secret, issuer and audience).
-/// The scoring worker has no user session, so it signs a short-lived token with the subject
-/// <see cref="ServiceSubject"/>. Scoring is rate limited per user in ai-svc, so all automatic scoring shares
-/// that limit.
+/// ai-svc authenticates the caller with its per-caller service token: the worker sends
+/// <c>Authorization: Bearer &lt;AI_SCORING_SERVICE_TOKEN&gt;</c>. ai-svc accepts that token on this route only.
+/// Scoring is rate limited per caller in ai-svc, so all automatic scoring shares that limit.
 ///
-/// Enabled only when AI_SERVICE_URL and a JWT secret of at least 32 characters are configured.
+/// Enabled only when AI_SERVICE_URL and AI_SCORING_SERVICE_TOKEN are both configured (non-blank).
 /// </summary>
 public sealed class AiServiceResumeScoringClient : IResumeScoringClient
 {
-    /// <summary>JWT subject of the automatic scoring worker, as seen by ai-svc.</summary>
-    public const string ServiceSubject = "app-svc-scoring";
-
-    private const int MinSecretLength = 32;
-    private static readonly TimeSpan TokenLifetime = TimeSpan.FromMinutes(5);
+    /// <summary>Minimum length of AI_SCORING_SERVICE_TOKEN. Enforced at startup in Production.</summary>
+    public const int MinTokenLength = 32;
 
     private readonly HttpClient _http;
     private readonly string _baseUrl;
-    private readonly JwtOptions _jwt;
+    private readonly string _token;
 
     public AiServiceResumeScoringClient(HttpClient http, IConfiguration configuration)
     {
         _http = http;
         _baseUrl = (configuration["AI_SERVICE_URL"] ?? configuration["AiService:Url"] ?? "").Trim().TrimEnd('/');
-        _jwt = configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>() ?? new JwtOptions();
+        _token = (configuration["AI_SCORING_SERVICE_TOKEN"] ?? "").Trim();
     }
 
     /// <inheritdoc />
-    public bool Enabled =>
-        !string.IsNullOrWhiteSpace(_baseUrl)
-        && !string.IsNullOrEmpty(_jwt.Secret)
-        && _jwt.Secret.Length >= MinSecretLength;
+    public bool Enabled => !string.IsNullOrWhiteSpace(_baseUrl) && !string.IsNullOrWhiteSpace(_token);
 
     /// <inheritdoc />
     public async Task<double> ScoreAsync(Stream cvStream, string cvFileName, Guid jobId, CancellationToken cancellationToken = default)
@@ -63,7 +51,7 @@ public sealed class AiServiceResumeScoringClient : IResumeScoringClient
         {
             Content = content,
         };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", MintServiceToken(DateTime.UtcNow));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
 
         try
         {
@@ -103,22 +91,6 @@ public sealed class AiServiceResumeScoringClient : IResumeScoringClient
         {
             throw new ResumeScoringException("AI service call timed out.", ex);
         }
-    }
-
-    private string MintServiceToken(DateTime now)
-    {
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwt.Secret!));
-        var descriptor = new SecurityTokenDescriptor
-        {
-            Issuer = _jwt.Issuer,
-            Audience = _jwt.Audience,
-            Subject = new ClaimsIdentity([new Claim(JwtRegisteredClaimNames.Sub, ServiceSubject)]),
-            NotBefore = now,
-            IssuedAt = now,
-            Expires = now + TokenLifetime,
-            SigningCredentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256),
-        };
-        return new JwtSecurityTokenHandler().CreateEncodedJwt(descriptor);
     }
 
     /// <summary>Reads the RFC 7807 <c>code</c> of an error response. The body is never logged.</summary>

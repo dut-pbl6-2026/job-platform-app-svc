@@ -27,7 +27,6 @@ public class AppDbContext : DbContext
             e.Property(x => x.CvUrl).HasMaxLength(Application.CvUrlMaxLength).IsRequired();
             e.Property(x => x.CoverLetter).HasMaxLength(Application.CoverLetterMaxLength);
             e.Property(x => x.RecruiterNotes).HasMaxLength(Application.RecruiterNotesMaxLength);
-            e.Property(x => x.Score);
             e.Property(x => x.CreatedAt).IsRequired();
             e.Property(x => x.UpdatedAt).IsRequired();
 

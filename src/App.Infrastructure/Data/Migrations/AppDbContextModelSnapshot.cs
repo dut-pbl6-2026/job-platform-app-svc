@@ -54,9 +54,6 @@ namespace App.Infrastructure.Data.Migrations
                         .IsConcurrencyToken()
                         .HasColumnType("integer");
 
-                    b.Property<double?>("Score")
-                        .HasColumnType("double precision");
-
                     b.Property<string>("Status")
                         .IsRequired()
                         .ValueGeneratedOnAdd()

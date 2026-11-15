@@ -113,7 +113,7 @@ public class ApplicationContractTests
     [Fact]
     public void UpdateStatusRequest_BindsCamelCaseClientPayload()
     {
-        const string json = """{"status":"reviewed","note":"Good fit","recruiterNotes":"Call back","score":88.0}""";
+        const string json = """{"status":"reviewed","note":"Good fit","recruiterNotes":"Call back"}""";
 
         var req = JsonSerializer.Deserialize<UpdateStatusRequest>(json, WebOptions);
 
@@ -121,7 +121,6 @@ public class ApplicationContractTests
         Assert.Equal("reviewed", req.Status);
         Assert.Equal("Good fit", req.Note);
         Assert.Equal("Call back", req.RecruiterNotes);
-        Assert.Equal(88.0, req.Score);
     }
 
     [Fact]
@@ -133,7 +132,6 @@ public class ApplicationContractTests
         Assert.Equal("rejected", req.Status);
         Assert.Null(req.Note);
         Assert.Null(req.RecruiterNotes);
-        Assert.Null(req.Score);
     }
 
     [Fact]

@@ -75,8 +75,7 @@ public record StatusHistoryDto(
 public record UpdateStatusRequest(
     string Status,
     string? Note = null,
-    string? RecruiterNotes = null,
-    double? Score = null
+    string? RecruiterNotes = null
 );
 
 public record StatusFlowDto(

@@ -7,8 +7,6 @@ public class Application : Entity
     public const int CoverLetterMaxLength = 4000;
     public const int CvUrlMaxLength = 1024;
     public const int RecruiterNotesMaxLength = 2000;
-    public const double MinScore = 0.0;
-    public const double MaxScore = 100.0;
 
     public Guid JobId { get; private set; }
     public Guid ApplicantId { get; private set; }
@@ -16,7 +14,6 @@ public class Application : Entity
     public string CvUrl { get; private set; } = string.Empty;
     public ApplicationStatus Status { get; private set; } = ApplicationStatus.Pending;
     public string? RecruiterNotes { get; private set; }
-    public double? Score { get; private set; }
 
     /// <summary>
     /// Optimistic concurrency token. Incremented on every change to the aggregate, so two writers that
@@ -105,15 +102,6 @@ public class Application : Entity
             throw new ArgumentException($"Recruiter notes cannot exceed {RecruiterNotesMaxLength} characters.", nameof(notes));
 
         RecruiterNotes = notes?.Trim();
-        MarkChanged();
-    }
-
-    public void SetScore(double? score)
-    {
-        if (score.HasValue && (score.Value < MinScore || score.Value > MaxScore || double.IsNaN(score.Value) || double.IsInfinity(score.Value)))
-            throw new ArgumentOutOfRangeException(nameof(score), $"Score must be between {MinScore} and {MaxScore}.");
-
-        Score = score;
         MarkChanged();
     }
 }

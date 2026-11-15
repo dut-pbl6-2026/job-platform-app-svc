@@ -20,7 +20,7 @@ Dependency: `Api -> Infrastructure -> Core -> SharedKernel` (`PackageReference J
 - `GET /api/applications/{id}/history` - Candidate/Recruiter views chronological status transition audit trail.
 - `GET /api/applications/{id}/allowed-transitions` - Query valid next status transitions for a specific application.
 - `GET /api/applications/job/{jobId}` - Recruiter views applications submitted for their job.
-- `PUT /api/applications/{id}/status` - Recruiter updates application status following the status flow state machine (`pending -> reviewed -> shortlisted -> accepted`, with `rejected` at any non-terminal stage, terminal states: `accepted`, `rejected`), optionally updating notes & score, and appends to status_history.
+- `PUT /api/applications/{id}/status` - Recruiter updates application status following the status flow state machine (`pending -> reviewed -> shortlisted -> accepted`, with `rejected` at any non-terminal stage, terminal states: `accepted`, `rejected`), optionally updating recruiter notes, and appends to status_history.
 - `GET /api/applications/cv/{fileName}` - Secure file download/streaming for CV files.
 - `GET /health` - Service healthcheck returning `{"status":"ok","service":"application"}`.
 
@@ -28,11 +28,11 @@ Dependency: `Api -> Infrastructure -> Core -> SharedKernel` (`PackageReference J
 - Database schema: `applications`, `status_history`, `outbox_events`, `scoring_jobs`
 - Unique index: `IX_applications_job_applicant_unique` on `(JobId, ApplicantId)`
 - Port: `5004` (gateway upstream `http://localhost:5004`)
-- Env vars: `DATABASE_URL_APP`, `APP_PORT`, `APP_CV_STORAGE_PATH`, `AI_SERVICE_URL` (automatic CV scoring; `Jwt` section for the service token)
+- Env vars: `DATABASE_URL_APP`, `APP_PORT`, `APP_CV_STORAGE_PATH`, `AI_SERVICE_URL` and `AI_SCORING_SERVICE_TOKEN` (automatic CV scoring; the worker stays disabled until both are set; Production refuses a token shorter than 32 characters)
 
 ## Automatic CV scoring
 - Applying creates one `scoring_jobs` row (Pending) in the same SaveChanges as the application. Nothing else triggers scoring.
-- `ResumeScoringWorkerService` claims due rows with `FOR UPDATE SKIP LOCKED` under a 10-minute lease, reads the CV through `IFileStorageService`, and calls ai-svc `POST /api/ai/score-resume` (`cv_file`, `job_id`). ai-svc fetches the job description itself.
+- `ResumeScoringWorkerService` claims due rows with `FOR UPDATE SKIP LOCKED` under a 10-minute lease, reads the CV through `IFileStorageService`, and calls ai-svc `POST /api/ai/score-resume` (`cv_file`, `job_id`) with `Authorization: Bearer <AI_SCORING_SERVICE_TOKEN>`, a per-caller token that ai-svc accepts on that route only. The token is read from configuration; no JWT is minted. ai-svc fetches the job description itself.
 - Counted failures back off (30 s, doubling, capped at 15 min); after 8 the row is Failed and logged at Error with its id. Rate limit or busy responses are not counted.
 - Recruiters see `score` and `scoreStatus` (pending, done, failed) on the job list and the detail. Applicants never see either. Applications created before scoring have no row: `scoreStatus` is null.
 

@@ -99,7 +99,7 @@ public sealed class ResumeScoringWorkerService : BackgroundService
         {
             if (!_disabledLogged)
             {
-                _logger.LogWarning("ResumeScoringWorkerService: AI service is not configured. Pending scoring jobs wait until it is.");
+                _logger.LogWarning("ResumeScoringWorkerService: AI service is not configured. Set AI_SERVICE_URL and AI_SCORING_SERVICE_TOKEN. Pending scoring jobs wait until both are set.");
                 _disabledLogged = true;
             }
             return false;
