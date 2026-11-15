@@ -1,3 +1,4 @@
+using App.Api.Services;
 using System.Security.Claims;
 using System.Text;
 using App.Api.Endpoints;
@@ -22,6 +23,7 @@ public class ApplicationEndpointsTests : IDisposable
     private readonly Guid _recruiterId = Guid.NewGuid();
     private readonly Guid _otherUserId = Guid.NewGuid();
     private readonly Guid _jobId = Guid.NewGuid();
+    private readonly JobServiceClient _jobClient = TestJobCompany.Owned();
 
     public ApplicationEndpointsTests()
     {
@@ -61,6 +63,8 @@ public class ApplicationEndpointsTests : IDisposable
                 new(ClaimTypes.NameIdentifier, userId.Value.ToString()),
                 new(ClaimTypes.Role, role)
             };
+            if (role == "Recruiter")
+                claims.Add(new Claim("company_id", TestJobCompany.CompanyId.ToString()));
             ctx.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
             ctx.Request.Headers["X-User-Id"] = userId.Value.ToString();
             ctx.Request.Headers["X-User-Role"] = role;
@@ -208,7 +212,7 @@ public class ApplicationEndpointsTests : IDisposable
 
         // Recruiter can access
         var recruiterCtx = BuildContext(_recruiterId, "Recruiter");
-        var recruiterResult = await ApplicationEndpoints.GetApplicationById(app.Id, _db, recruiterCtx);
+        var recruiterResult = await ApplicationEndpoints.GetApplicationById(app.Id, _db, recruiterCtx, jobClient: _jobClient);
         Assert.Equal(200, (recruiterResult as IStatusCodeHttpResult)?.StatusCode);
 
         // Unauthorized user cannot access (403)
@@ -227,7 +231,7 @@ public class ApplicationEndpointsTests : IDisposable
         var recruiterCtx = BuildContext(_recruiterId, "Recruiter");
         var updateReq = new UpdateStatusRequest("reviewed", "Passed initial CV screening");
 
-        var result = await ApplicationEndpoints.UpdateApplicationStatus(app.Id, updateReq, _db, recruiterCtx);
+        var result = await ApplicationEndpoints.UpdateApplicationStatus(app.Id, updateReq, _db, recruiterCtx, jobClient: _jobClient);
 
         var statusCodeResult = result as IStatusCodeHttpResult;
         Assert.NotNull(statusCodeResult);
@@ -252,12 +256,12 @@ public class ApplicationEndpointsTests : IDisposable
 
         // 1. Pending -> Reviewed
         var res1 = await ApplicationEndpoints.UpdateApplicationStatus(
-            app.Id, new UpdateStatusRequest("reviewed", "CV looks good"), _db, recruiterCtx);
+            app.Id, new UpdateStatusRequest("reviewed", "CV looks good"), _db, recruiterCtx, jobClient: _jobClient);
         Assert.Equal(200, (res1 as IStatusCodeHttpResult)?.StatusCode);
 
         // 2. Reviewed -> Shortlisted
         var res2 = await ApplicationEndpoints.UpdateApplicationStatus(
-            app.Id, new UpdateStatusRequest("shortlisted", "Invite to technical round"), _db, recruiterCtx);
+            app.Id, new UpdateStatusRequest("shortlisted", "Invite to technical round"), _db, recruiterCtx, jobClient: _jobClient);
         Assert.Equal(200, (res2 as IStatusCodeHttpResult)?.StatusCode);
 
         // 3. Shortlisted -> Accepted (with score & notes)
@@ -265,7 +269,7 @@ public class ApplicationEndpointsTests : IDisposable
             app.Id,
             new UpdateStatusRequest("accepted", "Offer accepted by candidate", "Hired as Mid-level Dev", 92.5),
             _db,
-            recruiterCtx);
+            recruiterCtx, jobClient: _jobClient);
         Assert.Equal(200, (res3 as IStatusCodeHttpResult)?.StatusCode);
 
         // Verify final state
@@ -287,7 +291,7 @@ public class ApplicationEndpointsTests : IDisposable
 
         // Pending -> Accepted is illegal (must go through review/shortlist)
         var updateReq = new UpdateStatusRequest("accepted", "Cannot jump directly");
-        var result = await ApplicationEndpoints.UpdateApplicationStatus(app.Id, updateReq, _db, recruiterCtx);
+        var result = await ApplicationEndpoints.UpdateApplicationStatus(app.Id, updateReq, _db, recruiterCtx, jobClient: _jobClient);
 
         var statusCodeResult = result as IStatusCodeHttpResult;
         Assert.NotNull(statusCodeResult);
@@ -304,10 +308,10 @@ public class ApplicationEndpointsTests : IDisposable
         var recruiterCtx = BuildContext(_recruiterId, "Recruiter");
 
         // Reject application
-        await ApplicationEndpoints.UpdateApplicationStatus(app.Id, new UpdateStatusRequest("rejected", "Not qualified"), _db, recruiterCtx);
+        await ApplicationEndpoints.UpdateApplicationStatus(app.Id, new UpdateStatusRequest("rejected", "Not qualified"), _db, recruiterCtx, jobClient: _jobClient);
 
         // Attempt to move from Rejected to Reviewed
-        var retryResult = await ApplicationEndpoints.UpdateApplicationStatus(app.Id, new UpdateStatusRequest("reviewed"), _db, recruiterCtx);
+        var retryResult = await ApplicationEndpoints.UpdateApplicationStatus(app.Id, new UpdateStatusRequest("reviewed"), _db, recruiterCtx, jobClient: _jobClient);
         Assert.Equal(409, (retryResult as IStatusCodeHttpResult)?.StatusCode);
     }
 
@@ -320,9 +324,9 @@ public class ApplicationEndpointsTests : IDisposable
 
         var recruiterCtx = BuildContext(_recruiterId, "Recruiter");
         await ApplicationEndpoints.UpdateApplicationStatus(
-            app.Id, new UpdateStatusRequest("reviewed", "Review completed"), _db, recruiterCtx);
+            app.Id, new UpdateStatusRequest("reviewed", "Review completed"), _db, recruiterCtx, jobClient: _jobClient);
         await ApplicationEndpoints.UpdateApplicationStatus(
-            app.Id, new UpdateStatusRequest("shortlisted", "Shortlisted for interview"), _db, recruiterCtx);
+            app.Id, new UpdateStatusRequest("shortlisted", "Shortlisted for interview"), _db, recruiterCtx, jobClient: _jobClient);
 
         // 1. Candidate views own application history
         var applicantCtx = BuildContext(_applicantId, "User");
@@ -337,7 +341,7 @@ public class ApplicationEndpointsTests : IDisposable
         Assert.Equal("shortlisted", history[2].Status);
 
         // 2. Recruiter views history
-        var recruiterResult = await ApplicationEndpoints.GetApplicationHistory(app.Id, _db, recruiterCtx);
+        var recruiterResult = await ApplicationEndpoints.GetApplicationHistory(app.Id, _db, recruiterCtx, jobClient: _jobClient);
         Assert.Equal(200, (recruiterResult as IStatusCodeHttpResult)?.StatusCode);
 
         // 3. Unauthorized other candidate receives 403 Forbidden
@@ -354,7 +358,7 @@ public class ApplicationEndpointsTests : IDisposable
         await _db.SaveChangesAsync();
 
         var recruiterCtx = BuildContext(_recruiterId, "Recruiter");
-        var result = await ApplicationEndpoints.GetAllowedTransitionsForApplication(app.Id, _db, recruiterCtx);
+        var result = await ApplicationEndpoints.GetAllowedTransitionsForApplication(app.Id, _db, recruiterCtx, jobClient: _jobClient);
 
         Assert.Equal(200, (result as IStatusCodeHttpResult)?.StatusCode);
     }
@@ -420,7 +424,7 @@ public class ApplicationEndpointsTests : IDisposable
         await _db.SaveChangesAsync();
 
         var ctx = BuildContext(_recruiterId, "Recruiter");
-        var result = await ApplicationEndpoints.DownloadCv(fileName, _db, _storage, ctx);
+        var result = await ApplicationEndpoints.DownloadCv(fileName, _db, _storage, ctx, _jobClient);
 
         Assert.NotNull(result);
         Assert.IsAssignableFrom<IContentTypeHttpResult>(result);
@@ -543,7 +547,7 @@ public class ApplicationEndpointsTests : IDisposable
         var longNote = new string('A', 1001);
         var updateReq = new UpdateStatusRequest("reviewed", longNote);
 
-        var result = await ApplicationEndpoints.UpdateApplicationStatus(app.Id, updateReq, _db, recruiterCtx);
+        var result = await ApplicationEndpoints.UpdateApplicationStatus(app.Id, updateReq, _db, recruiterCtx, jobClient: _jobClient);
 
         var statusCodeResult = result as IStatusCodeHttpResult;
         Assert.NotNull(statusCodeResult);
@@ -565,7 +569,7 @@ public class ApplicationEndpointsTests : IDisposable
     public async Task GetApplicationsByJobId_InvalidStatus_Returns400ValidationProblem()
     {
         var ctx = BuildContext(_recruiterId, "Recruiter");
-        var result = await ApplicationEndpoints.GetApplicationsByJobId(_jobId, "unknown_status", 1, 10, _db, ctx);
+        var result = await ApplicationEndpoints.GetApplicationsByJobId(_jobId, "unknown_status", 1, 10, _db, ctx, _jobClient);
 
         var statusCodeResult = result as IStatusCodeHttpResult;
         Assert.NotNull(statusCodeResult);
@@ -650,7 +654,7 @@ public class ApplicationEndpointsTests : IDisposable
         var recruiterCtx = BuildContext(_recruiterId, "Recruiter");
         var updateReq = new UpdateStatusRequest("shortlisted", "Skipping reviewed directly");
 
-        var result = await ApplicationEndpoints.UpdateApplicationStatus(app.Id, updateReq, _db, recruiterCtx);
+        var result = await ApplicationEndpoints.UpdateApplicationStatus(app.Id, updateReq, _db, recruiterCtx, jobClient: _jobClient);
 
         var statusCodeResult = result as IStatusCodeHttpResult;
         Assert.NotNull(statusCodeResult);
@@ -669,7 +673,7 @@ public class ApplicationEndpointsTests : IDisposable
         var recruiterCtx = BuildContext(_recruiterId, "Recruiter");
         var updateReq = new UpdateStatusRequest("reviewed", "Valid note", Score: invalidScore);
 
-        var result = await ApplicationEndpoints.UpdateApplicationStatus(app.Id, updateReq, _db, recruiterCtx);
+        var result = await ApplicationEndpoints.UpdateApplicationStatus(app.Id, updateReq, _db, recruiterCtx, jobClient: _jobClient);
 
         var statusCodeResult = result as IStatusCodeHttpResult;
         Assert.NotNull(statusCodeResult);
@@ -687,7 +691,7 @@ public class ApplicationEndpointsTests : IDisposable
         var longNotes = new string('N', Application.RecruiterNotesMaxLength + 1);
         var updateReq = new UpdateStatusRequest("reviewed", "Valid note", RecruiterNotes: longNotes);
 
-        var result = await ApplicationEndpoints.UpdateApplicationStatus(app.Id, updateReq, _db, recruiterCtx);
+        var result = await ApplicationEndpoints.UpdateApplicationStatus(app.Id, updateReq, _db, recruiterCtx, jobClient: _jobClient);
 
         var statusCodeResult = result as IStatusCodeHttpResult;
         Assert.NotNull(statusCodeResult);

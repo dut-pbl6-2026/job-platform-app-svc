@@ -65,5 +65,57 @@ public class JobServiceClient
         }
     }
 
+    /// <summary>
+    /// Authorization lookup: which company owns the job. Unlike <see cref="GetJobTitleAsync"/>
+    /// this is NOT best-effort. Callers must deny access unless the result is
+    /// <see cref="JobCompanyLookupStatus.Found"/> with a matching company.
+    /// </summary>
+    public async Task<(JobCompanyLookupStatus Status, Guid? CompanyId)> GetJobCompanyAsync(Guid jobId, CancellationToken ct = default)
+    {
+        if (!Enabled)
+        {
+            return (JobCompanyLookupStatus.Unavailable, null);
+        }
+
+        try
+        {
+            using var response = await _http.GetAsync($"{_baseUrl}/api/jobs/{jobId}", ct);
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                return (JobCompanyLookupStatus.NotFound, null);
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "Job company lookup HTTP {Status} for JobId={JobId}. Access will be denied.",
+                    (int)response.StatusCode, jobId);
+                return (JobCompanyLookupStatus.Unavailable, null);
+            }
+
+            var payload = await response.Content.ReadFromJsonAsync<JobCompanyResponse>(JsonOptions, ct);
+            if (payload?.CompanyId is { } companyId && companyId != Guid.Empty)
+            {
+                return (JobCompanyLookupStatus.Found, companyId);
+            }
+
+            return (JobCompanyLookupStatus.Unavailable, null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Job company lookup failed for JobId={JobId}. Access will be denied.", jobId);
+            return (JobCompanyLookupStatus.Unavailable, null);
+        }
+    }
+
     private sealed record JobTitleResponse(string? Title);
+
+    private sealed record JobCompanyResponse(Guid? CompanyId);
+}
+
+public enum JobCompanyLookupStatus
+{
+    Found,
+    NotFound,
+    Unavailable,
 }

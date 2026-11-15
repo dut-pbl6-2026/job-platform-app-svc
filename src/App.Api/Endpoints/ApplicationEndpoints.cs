@@ -75,6 +75,34 @@ public static class ApplicationEndpoints
         return Guid.TryParse(idStr, out var id) ? (id, role) : (null, role);
     }
 
+    /// <summary>
+    /// Recruiters may act only on jobs owned by their company: the JWT company_id claim must equal
+    /// the job's CompanyId from job-svc. Admins are not restricted. Fails closed: a recruiter without a
+    /// company claim, a missing job-svc client, or a failed lookup is denied. Returns null when allowed.
+    /// </summary>
+    private static async Task<IResult?> EnsureRecruiterOwnsJobAsync(
+        HttpContext ctx, string role, Guid jobId, JobServiceClient? jobClient)
+    {
+        if (role.Equals("Admin", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var companyClaim = ctx.User.FindFirst("company_id")?.Value;
+        if (!Guid.TryParse(companyClaim, out var recruiterCompanyId) || recruiterCompanyId == Guid.Empty)
+            return ForbiddenResult("Your account is not linked to a company.");
+
+        if (jobClient is null)
+            return Results.Problem(detail: "Job ownership cannot be verified right now.", statusCode: StatusCodes.Status503ServiceUnavailable);
+
+        var (status, jobCompanyId) = await jobClient.GetJobCompanyAsync(jobId, ctx.RequestAborted);
+        return status switch
+        {
+            JobCompanyLookupStatus.Found when jobCompanyId == recruiterCompanyId => null,
+            JobCompanyLookupStatus.Found => ForbiddenResult("You can only access applications for jobs from your company."),
+            JobCompanyLookupStatus.NotFound => Results.NotFound(new { message = "Job not found." }),
+            _ => Results.Problem(detail: "Job ownership cannot be verified right now.", statusCode: StatusCodes.Status503ServiceUnavailable),
+        };
+    }
+
     private static IResult UnauthorizedResult(string message = "Unauthorized. Missing or invalid user identity.") =>
         Results.Json(new { message }, statusCode: 401);
 
@@ -261,7 +289,8 @@ public static class ApplicationEndpoints
     public static async Task<IResult> GetApplicationById(
         Guid id,
         AppDbContext db,
-        HttpContext ctx)
+        HttpContext ctx,
+        JobServiceClient? jobClient = null)
     {
         var (userId, role) = GetIdentity(ctx);
         if (userId is null)
@@ -282,6 +311,12 @@ public static class ApplicationEndpoints
 
         if (!isOwner && !isRecruiterOrAdmin)
             return ForbiddenResult("You are not authorized to view this application.");
+
+        if (!isOwner && role.Equals("Recruiter", StringComparison.OrdinalIgnoreCase))
+        {
+            var denied = await EnsureRecruiterOwnsJobAsync(ctx, role, app.JobId, jobClient);
+            if (denied is not null) return denied;
+        }
 
         var historyDtos = app.StatusHistories
             .OrderBy(h => h.ChangedAt)
@@ -322,7 +357,8 @@ public static class ApplicationEndpoints
     public static async Task<IResult> GetApplicationHistory(
         Guid id,
         AppDbContext db,
-        HttpContext ctx)
+        HttpContext ctx,
+        JobServiceClient? jobClient = null)
     {
         var (userId, role) = GetIdentity(ctx);
         if (userId is null)
@@ -342,6 +378,12 @@ public static class ApplicationEndpoints
 
         if (!isOwner && !isRecruiterOrAdmin)
             return ForbiddenResult("You are not authorized to view the history for this application.");
+
+        if (!isOwner && role.Equals("Recruiter", StringComparison.OrdinalIgnoreCase))
+        {
+            var denied = await EnsureRecruiterOwnsJobAsync(ctx, role, app.JobId, jobClient);
+            if (denied is not null) return denied;
+        }
 
         var history = app.StatusHistories
             .OrderBy(h => h.ChangedAt)
@@ -364,7 +406,8 @@ public static class ApplicationEndpoints
     public static async Task<IResult> GetAllowedTransitionsForApplication(
         Guid id,
         AppDbContext db,
-        HttpContext ctx)
+        HttpContext ctx,
+        JobServiceClient? jobClient = null)
     {
         var (userId, role) = GetIdentity(ctx);
         if (userId is null)
@@ -380,6 +423,12 @@ public static class ApplicationEndpoints
 
         if (!isOwner && !isRecruiterOrAdmin)
             return ForbiddenResult("You are not authorized to view transition rules for this application.");
+
+        if (!isOwner && role.Equals("Recruiter", StringComparison.OrdinalIgnoreCase))
+        {
+            var denied = await EnsureRecruiterOwnsJobAsync(ctx, role, app.JobId, jobClient);
+            if (denied is not null) return denied;
+        }
 
         return Results.Ok(new
         {
@@ -426,7 +475,8 @@ public static class ApplicationEndpoints
         int? page,
         int? size,
         AppDbContext db,
-        HttpContext ctx)
+        HttpContext ctx,
+        JobServiceClient? jobClient = null)
     {
         var (userId, role) = GetIdentity(ctx);
         if (userId is null)
@@ -437,6 +487,9 @@ public static class ApplicationEndpoints
 
         if (!isRecruiterOrAdmin)
             return ForbiddenResult("Only recruiters or administrators can view job applications.");
+
+        var jobDenied = await EnsureRecruiterOwnsJobAsync(ctx, role, jobId, jobClient);
+        if (jobDenied is not null) return jobDenied;
 
         var pageIndex = Math.Max(0, (page ?? 0) > 0 ? (page!.Value - 1) : 0);
         var pageSize = Math.Clamp(size ?? 20, 1, 100);
@@ -535,6 +588,9 @@ public static class ApplicationEndpoints
         if (application is null)
             return Results.NotFound(new { message = "Application not found." });
 
+        var jobDenied = await EnsureRecruiterOwnsJobAsync(ctx, role, application.JobId, jobClient);
+        if (jobDenied is not null) return jobDenied;
+
         var previousStatus = application.Status;
 
         try
@@ -611,7 +667,8 @@ public static class ApplicationEndpoints
         string fileName,
         AppDbContext db,
         IFileStorageService storage,
-        HttpContext ctx)
+        HttpContext ctx,
+        JobServiceClient? jobClient = null)
     {
         var (userId, role) = GetIdentity(ctx);
         if (userId is null)
@@ -635,6 +692,12 @@ public static class ApplicationEndpoints
 
         if (!isOwner && !isRecruiterOrAdmin)
             return ForbiddenResult("You are not authorized to view or download this CV.");
+
+        if (!isOwner && role.Equals("Recruiter", StringComparison.OrdinalIgnoreCase))
+        {
+            var denied = await EnsureRecruiterOwnsJobAsync(ctx, role, application.JobId, jobClient);
+            if (denied is not null) return denied;
+        }
 
         var result = await storage.GetCvAsync(sanitizedFileName);
         if (result is null)
