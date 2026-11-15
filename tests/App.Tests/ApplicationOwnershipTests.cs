@@ -155,6 +155,25 @@ public class ApplicationOwnershipTests : IDisposable
         Assert.Equal(404, Status(result));
     }
 
+    [Fact]
+    public async Task NoInternalToken_DeniesRecruiter()
+    {
+        var ctx = TestJobCompany.RecruiterContext(_ownRecruiter, TestJobCompany.CompanyId);
+        var result = await ApplicationEndpoints.GetApplicationsByJobId(_jobId, null, 1, 20, _db, ctx,
+            TestJobCompany.NoInternalToken());
+        Assert.Equal(503, Status(result));
+    }
+
+    [Fact]
+    public async Task OwnershipLookup_SendsInternalServiceToken()
+    {
+        var (client, lastAuth) = TestJobCompany.Recording();
+        var ctx = TestJobCompany.RecruiterContext(_ownRecruiter, TestJobCompany.CompanyId);
+        var result = await ApplicationEndpoints.GetApplicationsByJobId(_jobId, null, 1, 20, _db, ctx, client);
+        Assert.Equal(200, Status(result));
+        Assert.Equal("Bearer test-internal-token", lastAuth());
+    }
+
     // ── Allowed paths still work ──
 
     [Fact]
