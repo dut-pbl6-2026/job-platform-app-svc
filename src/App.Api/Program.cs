@@ -77,6 +77,16 @@ builder.Services.AddHostedService<OutboxPublisherService>();
 // Automatic CV scoring: ai-svc scores each new application against its job (no third-party AI API).
 // The timeout bounds one call; the worker lease (ResumeScoringWorkerService.LeaseDuration) covers a full batch.
 // Registered as a singleton too, so tests can run a scoring cycle directly.
+// Production refuses a short token instead of silently sending a weak one. An unset token leaves scoring disabled.
+var scoringToken = (builder.Configuration["AI_SCORING_SERVICE_TOKEN"] ?? "").Trim();
+if (builder.Environment.IsProduction()
+    && scoringToken.Length > 0
+    && scoringToken.Length < AiServiceResumeScoringClient.MinTokenLength)
+{
+    throw new InvalidOperationException(
+        $"AI_SCORING_SERVICE_TOKEN is too short. Use at least {AiServiceResumeScoringClient.MinTokenLength} characters.");
+}
+
 builder.Services.AddHttpClient<IResumeScoringClient, AiServiceResumeScoringClient>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(60);

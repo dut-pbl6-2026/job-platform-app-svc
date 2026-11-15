@@ -1,22 +1,22 @@
-using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Text;
-using System.Text.Json;
+using System.Text.RegularExpressions;
 using App.Api.Services;
 using App.Core.Interfaces;
 using Microsoft.Extensions.Configuration;
-using Microsoft.IdentityModel.Tokens;
 using Xunit;
 
 namespace App.Tests;
 
 /// <summary>
-/// The ai-svc request and response mapping: route, multipart fields, the service JWT ai-svc validates, and the
+/// The ai-svc request and response mapping: route, multipart fields, the bearer service token, and the
 /// mapping of each response to a score, a throttle, or a counted failure.
 /// </summary>
 public class AiServiceResumeScoringClientTests
 {
-    private const string Secret = "scoring-test-secret-0123456789abcdef";
+    // Opaque token, deliberately not JWT-shaped (no dots), so a JWT-minting regression cannot pass by accident.
+    private const string Token = "scoring-test-token-0123456789abcdefgh";
+    private static readonly Regex JwtShape = new(@"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*$");
     private static readonly Guid JobId = Guid.Parse("11111111-2222-4333-8444-555555555555");
 
     private sealed class StubHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> respond) : HttpMessageHandler
@@ -32,14 +32,12 @@ public class AiServiceResumeScoringClientTests
         }
     }
 
-    private static IConfiguration Config(string? secret = Secret, string? url = "http://ai:6000") =>
+    private static IConfiguration Config(string? token = Token, string? url = "http://ai:6000") =>
         new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["AI_SERVICE_URL"] = url,
-                ["Jwt:Secret"] = secret,
-                ["Jwt:Issuer"] = "job-platform",
-                ["Jwt:Audience"] = "job-platform",
+                ["AI_SCORING_SERVICE_TOKEN"] = token,
             })
             .Build();
 
@@ -74,31 +72,15 @@ public class AiServiceResumeScoringClientTests
     }
 
     [Fact]
-    public async Task Score_SendsAServiceJwtThatAiServiceAccepts()
+    public async Task Score_SendsTheConfiguredTokenAsABearer_NotAJwt()
     {
         var handler = new StubHandler(_ => Task.FromResult(Json(HttpStatusCode.OK, """{"overall_score":10}""")));
         await ScoreAsync(Client(handler));
 
-        var token = handler.Request!.Headers.Authorization!;
-        Assert.Equal("Bearer", token.Scheme);
-
-        var validation = new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidIssuer = "job-platform",
-            ValidateAudience = true,
-            ValidAudience = "job-platform",
-            ValidateLifetime = true,
-            ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(Secret)),
-            ClockSkew = TimeSpan.FromSeconds(5),
-        };
-        new JwtSecurityTokenHandler().ValidateToken(token.Parameter!, validation, out var validated);
-        var jwt = (JwtSecurityToken)validated;
-
-        Assert.Equal(AiServiceResumeScoringClient.ServiceSubject, jwt.Subject);
-        Assert.NotNull(jwt.Payload.Expiration);
-        Assert.True(jwt.ValidTo <= DateTime.UtcNow.AddMinutes(6));
+        var auth = handler.Request!.Headers.Authorization!;
+        Assert.Equal("Bearer", auth.Scheme);
+        Assert.Equal(Token, auth.Parameter);
+        Assert.DoesNotMatch(JwtShape, auth.Parameter!);
     }
 
     [Fact]
@@ -164,19 +146,20 @@ public class AiServiceResumeScoringClientTests
     }
 
     [Fact]
-    public void Enabled_RequiresUrlAndAStrongSecret()
+    public void Enabled_RequiresUrlAndToken()
     {
-        Assert.True(Client(new StubHandler(_ => throw new InvalidOperationException()), Config()).Enabled);
-        Assert.False(Client(new StubHandler(_ => throw new InvalidOperationException()), Config(url: "")).Enabled);
-        Assert.False(Client(new StubHandler(_ => throw new InvalidOperationException()), Config(secret: "")).Enabled);
-        Assert.False(Client(new StubHandler(_ => throw new InvalidOperationException()), Config(secret: "too-short")).Enabled);
+        var handler = new StubHandler(_ => throw new InvalidOperationException());
+        Assert.True(Client(handler, Config()).Enabled);
+        Assert.False(Client(handler, Config(url: "")).Enabled);
+        Assert.False(Client(handler, Config(token: "")).Enabled);
+        Assert.False(Client(handler, Config(token: "   ")).Enabled);
     }
 
     [Fact]
     public async Task ScoreWhenNotEnabled_ThrowsWithoutCallingTheService()
     {
         var handler = new StubHandler(_ => throw new InvalidOperationException("must not be called"));
-        var client = Client(handler, Config(secret: ""));
+        var client = Client(handler, Config(token: ""));
 
         await Assert.ThrowsAsync<ResumeScoringException>(() => ScoreAsync(client));
         Assert.Null(handler.Request);

@@ -1,6 +1,7 @@
 using System.Text;
 using App.Core.Entities;
 using App.Core.Interfaces;
+using App.Api.Services;
 using App.Infrastructure.Data;
 using App.Infrastructure.Services;
 using App.Infrastructure.Workers;
@@ -217,6 +218,44 @@ public class ResumeScoringWorkerTests : IDisposable
         Assert.Equal([false], nestedCycleResults);
         Assert.Single(_client.Calls);
         Assert.Equal(ScoringStatus.Done, (await LoadAsync(applicationId)).Status);
+    }
+
+    /// <summary>Counts HTTP calls. A disabled worker must never reach ai-svc.</summary>
+    private sealed class CountingHandler : HttpMessageHandler
+    {
+        public int Calls { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Calls++;
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK));
+        }
+    }
+
+    [Fact]
+    public async Task ScorePending_WithoutScoringToken_WarnsNamingTheTokenAndNeverCallsAi()
+    {
+        var (applicationId, _) = await ApplyAsync();
+        var before = await LoadAsync(applicationId);
+        var handler = new CountingHandler();
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["AI_SERVICE_URL"] = "http://ai:6000" })
+            .Build();
+        var worker = new ResumeScoringWorkerService(
+            _services.GetRequiredService<IServiceScopeFactory>(),
+            new AiServiceResumeScoringClient(new HttpClient(handler), config),
+            _logger);
+
+        Assert.False(await worker.ScorePendingAsync(CancellationToken.None));
+        Assert.False(await worker.ScorePendingAsync(CancellationToken.None));
+
+        var job = await LoadAsync(applicationId);
+        Assert.Equal(ScoringStatus.Pending, job.Status);
+        Assert.Equal(0, job.AttemptCount);
+        Assert.Equal(before.NextAttemptAt, job.NextAttemptAt);
+        Assert.Equal(0, handler.Calls);
+        var warning = Assert.Single(_logger.Entries, e => e.Level == LogLevel.Warning);
+        Assert.Contains("AI_SCORING_SERVICE_TOKEN", warning.Message);
     }
 
     [Fact]
