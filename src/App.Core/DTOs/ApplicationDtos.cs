@@ -5,7 +5,23 @@ namespace App.Core.DTOs;
 
 public record ApplyJobRequest(Guid JobId, string? CoverLetter);
 
-public record ApplicationDetailDto(
+/// <summary>Detail view for the applicant who submitted the application. Never includes recruiter notes.</summary>
+public record ApplicantApplicationDetailDto(
+    Guid Id,
+    Guid JobId,
+    Guid ApplicantId,
+    string? CoverLetter,
+    string CvUrl,
+    string Status,
+    double? Score,
+    DateTime CreatedAt,
+    DateTime UpdatedAt,
+    IReadOnlyList<StatusHistoryDto> StatusHistory,
+    IReadOnlyList<string>? NextAllowedStatuses = null
+);
+
+/// <summary>Detail view for recruiters and admins: the applicant view plus internal recruiter notes.</summary>
+public record RecruiterApplicationDetailDto(
     Guid Id,
     Guid JobId,
     Guid ApplicantId,

@@ -29,6 +29,10 @@ public class AppDbContext : DbContext
             e.Property(x => x.CreatedAt).IsRequired();
             e.Property(x => x.UpdatedAt).IsRequired();
 
+            // Optimistic concurrency: an UPDATE is conditioned on the RowVersion that was loaded, so a
+            // concurrent status change fails with DbUpdateConcurrencyException instead of overwriting it.
+            e.Property(x => x.RowVersion).IsRequired().IsConcurrencyToken();
+
             e.Property(x => x.Status)
                 .HasConversion<string>()
                 .HasMaxLength(32)
