@@ -110,7 +110,7 @@ public class ApplicationEndpointsTests : IDisposable
         };
         var req = BuildMultipartRequest(fields, "cv.pdf");
 
-        var result = await ApplicationEndpoints.ApplyForJob(req, _db, _storage, ctx);
+        var result = await ApplicationEndpoints.ApplyForJob(req, _db, _storage, ctx, jobClient: _jobClient);
 
         Assert.NotNull(result);
         var statusCodeResult = result as IStatusCodeHttpResult;
@@ -143,7 +143,7 @@ public class ApplicationEndpointsTests : IDisposable
         };
         var req = BuildMultipartRequest(fields, "cv2.pdf");
 
-        var result = await ApplicationEndpoints.ApplyForJob(req, _db, _storage, ctx);
+        var result = await ApplicationEndpoints.ApplyForJob(req, _db, _storage, ctx, jobClient: _jobClient);
 
         Assert.NotNull(result);
         var statusCodeResult = result as IStatusCodeHttpResult;
@@ -158,11 +158,78 @@ public class ApplicationEndpointsTests : IDisposable
         var fields = new Dictionary<string, string> { ["job_id"] = _jobId.ToString() };
         var req = BuildMultipartRequest(fields);
 
-        var result = await ApplicationEndpoints.ApplyForJob(req, _db, _storage, ctx);
+        var result = await ApplicationEndpoints.ApplyForJob(req, _db, _storage, ctx, jobClient: _jobClient);
 
         var statusCodeResult = result as IStatusCodeHttpResult;
         Assert.NotNull(statusCodeResult);
         Assert.Equal(401, statusCodeResult.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("Pending")]
+    [InlineData("Rejected")]
+    [InlineData("Closed")]
+    [InlineData("Deleted")]
+    public async Task ApplyForJob_JobNotActive_Returns409AndStoresNothing(string jobStatus)
+    {
+        var ctx = BuildContext(_applicantId, "User");
+        var req = BuildMultipartRequest(new Dictionary<string, string> { ["job_id"] = _jobId.ToString() }, "cv.pdf");
+
+        var result = await ApplicationEndpoints.ApplyForJob(
+            req, _db, _storage, ctx, jobClient: TestJobCompany.WithJobStatus(jobStatus));
+
+        Assert.Equal(409, ((IStatusCodeHttpResult)result).StatusCode);
+        Assert.False(await _db.Applications.AnyAsync());
+    }
+
+    [Fact]
+    public async Task ApplyForJob_JobServiceUnavailable_Returns503AndStoresNothing()
+    {
+        var ctx = BuildContext(_applicantId, "User");
+        var req = BuildMultipartRequest(new Dictionary<string, string> { ["job_id"] = _jobId.ToString() }, "cv.pdf");
+
+        var result = await ApplicationEndpoints.ApplyForJob(req, _db, _storage, ctx, jobClient: TestJobCompany.Down());
+
+        Assert.Equal(503, ((IStatusCodeHttpResult)result).StatusCode);
+        Assert.False(await _db.Applications.AnyAsync());
+    }
+
+    [Fact]
+    public async Task ApplyForJob_NoJobServiceClient_Returns503AndStoresNothing()
+    {
+        var ctx = BuildContext(_applicantId, "User");
+        var req = BuildMultipartRequest(new Dictionary<string, string> { ["job_id"] = _jobId.ToString() }, "cv.pdf");
+
+        var result = await ApplicationEndpoints.ApplyForJob(req, _db, _storage, ctx, jobClient: null);
+
+        Assert.Equal(503, ((IStatusCodeHttpResult)result).StatusCode);
+        Assert.False(await _db.Applications.AnyAsync());
+    }
+
+    [Fact]
+    public async Task ApplyForJob_MissingJob_Returns404AndStoresNothing()
+    {
+        var ctx = BuildContext(_applicantId, "User");
+        var req = BuildMultipartRequest(new Dictionary<string, string> { ["job_id"] = _jobId.ToString() }, "cv.pdf");
+
+        var result = await ApplicationEndpoints.ApplyForJob(req, _db, _storage, ctx, jobClient: TestJobCompany.Missing());
+
+        Assert.Equal(404, ((IStatusCodeHttpResult)result).StatusCode);
+        Assert.False(await _db.Applications.AnyAsync());
+    }
+
+    [Fact]
+    public async Task ApplyForJob_LooksUpJobOnlyOnInternalEndpoint()
+    {
+        // The public GET /api/jobs/{id} counts a view on every call, so apply must never call it.
+        var ctx = BuildContext(_applicantId, "User");
+        var req = BuildMultipartRequest(new Dictionary<string, string> { ["job_id"] = _jobId.ToString() }, "cv.pdf");
+        var (client, paths) = TestJobCompany.RecordingPaths();
+
+        var result = await ApplicationEndpoints.ApplyForJob(req, _db, _storage, ctx, jobClient: client);
+
+        Assert.Equal(201, ((IStatusCodeHttpResult)result).StatusCode);
+        Assert.Equal(new[] { $"/api/internal/jobs/{_jobId}" }, paths);
     }
 
     [Fact]
@@ -488,7 +555,7 @@ public class ApplicationEndpointsTests : IDisposable
         };
         var req = BuildMultipartRequest(fields, "race_cv.pdf");
 
-        var result = await ApplicationEndpoints.ApplyForJob(req, throwingDb, _storage, ctx);
+        var result = await ApplicationEndpoints.ApplyForJob(req, throwingDb, _storage, ctx, jobClient: _jobClient);
 
         var statusCodeResult = result as IStatusCodeHttpResult;
         Assert.NotNull(statusCodeResult);
@@ -507,7 +574,7 @@ public class ApplicationEndpointsTests : IDisposable
         var badPdfBytes = "Not a PDF document"u8.ToArray();
         var req = BuildMultipartRequest(fields, "cv.pdf", badPdfBytes);
 
-        var result = await ApplicationEndpoints.ApplyForJob(req, _db, _storage, ctx);
+        var result = await ApplicationEndpoints.ApplyForJob(req, _db, _storage, ctx, jobClient: _jobClient);
 
         var statusCodeResult = result as IStatusCodeHttpResult;
         Assert.NotNull(statusCodeResult);
@@ -529,7 +596,7 @@ public class ApplicationEndpointsTests : IDisposable
         ctx.Request.Form = new FormCollection(formFields, new FormFileCollection { formFile });
 
         var userCtx = BuildContext(_applicantId, "User");
-        var result = await ApplicationEndpoints.ApplyForJob(ctx.Request, _db, _storage, userCtx);
+        var result = await ApplicationEndpoints.ApplyForJob(ctx.Request, _db, _storage, userCtx, jobClient: _jobClient);
 
         var statusCodeResult = result as IStatusCodeHttpResult;
         Assert.NotNull(statusCodeResult);
@@ -587,7 +654,7 @@ public class ApplicationEndpointsTests : IDisposable
         var fields = new Dictionary<string, string> { ["job_id"] = _jobId.ToString() };
         var req = BuildMultipartRequest(fields);
 
-        var result = await ApplicationEndpoints.ApplyForJob(req, _db, _storage, ctx);
+        var result = await ApplicationEndpoints.ApplyForJob(req, _db, _storage, ctx, jobClient: _jobClient);
 
         var statusCodeResult = result as IStatusCodeHttpResult;
         Assert.NotNull(statusCodeResult);
@@ -728,7 +795,7 @@ public class ApplicationEndpointsTests : IDisposable
         var req = BuildMultipartRequest(fields, "non_unique_cv.pdf");
 
         await Assert.ThrowsAsync<DbUpdateException>(() =>
-            ApplicationEndpoints.ApplyForJob(req, throwingDb, _storage, ctx));
+            ApplicationEndpoints.ApplyForJob(req, throwingDb, _storage, ctx, jobClient: _jobClient));
 
         // Verify orphan CV file was cleaned up on disk even though exception rethrown
         var remainingFiles = Directory.GetFiles(_testStorageDir);

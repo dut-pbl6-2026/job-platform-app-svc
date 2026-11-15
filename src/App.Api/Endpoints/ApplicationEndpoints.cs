@@ -93,14 +93,27 @@ public static class ApplicationEndpoints
         if (jobClient is null)
             return Results.Problem(detail: "Job ownership cannot be verified right now.", statusCode: StatusCodes.Status503ServiceUnavailable);
 
-        var (status, jobCompanyId) = await jobClient.GetJobCompanyAsync(jobId, ctx.RequestAborted);
+        var (status, job) = await jobClient.GetJobAsync(jobId, ctx.RequestAborted);
         return status switch
         {
-            JobCompanyLookupStatus.Found when jobCompanyId == recruiterCompanyId => null,
-            JobCompanyLookupStatus.Found => ForbiddenResult("You can only access applications for jobs from your company."),
-            JobCompanyLookupStatus.NotFound => Results.NotFound(new { message = "Job not found." }),
+            JobLookupStatus.Found when job!.CompanyId == recruiterCompanyId => null,
+            JobLookupStatus.Found => ForbiddenResult("You can only access applications for jobs from your company."),
+            JobLookupStatus.NotFound => Results.NotFound(new { message = "Job not found." }),
             _ => Results.Problem(detail: "Job ownership cannot be verified right now.", statusCode: StatusCodes.Status503ServiceUnavailable),
         };
+    }
+
+    /// <summary>
+    /// Job title for application event payloads. Best-effort: empty when job-svc cannot resolve the job,
+    /// so a status change is never blocked by job-svc.
+    /// </summary>
+    private static async Task<string> ResolveJobTitleAsync(JobServiceClient? jobClient, Guid jobId)
+    {
+        if (jobClient is null)
+            return string.Empty;
+
+        var (status, job) = await jobClient.GetJobAsync(jobId, CancellationToken.None);
+        return status == JobLookupStatus.Found ? job!.Title : string.Empty;
     }
 
     private static IResult UnauthorizedResult(string message = "Unauthorized. Missing or invalid user identity.") =>
@@ -160,6 +173,25 @@ public static class ApplicationEndpoints
             });
         }
 
+        // Applications are accepted only for Active jobs. Without a successful job lookup the status is
+        // unknown, so the application is refused rather than stored.
+        if (jobClient is null)
+            return Results.Problem(detail: "Job status cannot be verified right now.", statusCode: StatusCodes.Status503ServiceUnavailable);
+
+        var (jobLookup, job) = await jobClient.GetJobAsync(jobId, ctx.RequestAborted);
+        if (jobLookup == JobLookupStatus.NotFound)
+            return Results.NotFound(new { message = "Job not found." });
+        if (jobLookup != JobLookupStatus.Found)
+            return Results.Problem(detail: "Job status cannot be verified right now.", statusCode: StatusCodes.Status503ServiceUnavailable);
+        if (job!.Status != JobStatus.Active)
+        {
+            return Results.Conflict(new
+            {
+                status = 409,
+                message = $"This job is not accepting applications (status: {job.Status})."
+            });
+        }
+
         // APP-01-02: Prevent duplicate applications
         var alreadyApplied = await db.Applications.AnyAsync(a => a.JobId == jobId && a.ApplicantId == userId.Value);
         if (alreadyApplied)
@@ -208,13 +240,9 @@ public static class ApplicationEndpoints
         }
 
         // PBL6-34: Kafka application.submitted (best-effort, post-commit).
-        // B-10: resolve JobTitle from job-svc over HTTP; empty title is tolerated.
         if (events is not null)
         {
-            var jobTitle = jobClient is null
-                ? string.Empty
-                : await jobClient.GetJobTitleAsync(application.JobId, CancellationToken.None);
-            await events.PublishSubmittedAsync(application, jobTitle);
+            await events.PublishSubmittedAsync(application, job!.Title);
         }
 
         return Results.Created($"/api/applications/{application.Id}", new
@@ -639,12 +667,9 @@ public static class ApplicationEndpoints
         }
 
         // PBL6-34: Kafka application.status_changed (best-effort, post-commit).
-        // B-10: resolve JobTitle from job-svc over HTTP; empty title is tolerated.
         if (events is not null)
         {
-            var jobTitle = jobClient is null
-                ? string.Empty
-                : await jobClient.GetJobTitleAsync(application.JobId, CancellationToken.None);
+            var jobTitle = await ResolveJobTitleAsync(jobClient, application.JobId);
             await events.PublishStatusChangedAsync(application, previousStatus.ToString(), userId.Value, jobTitle);
         }
 

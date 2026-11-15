@@ -227,7 +227,7 @@ public sealed class InternalApplicationsEndpointTests : IDisposable
     {
         var request = MultipartRequest(jobId);
         var result = await ApplicationEndpoints.ApplyForJob(
-            request, _db, _storage, UserContext(applicantId, "User"));
+            request, _db, _storage, UserContext(applicantId, "User"), jobClient: TestJobCompany.Owned());
         Assert.Equal(201, StatusOf(result));
     }
 

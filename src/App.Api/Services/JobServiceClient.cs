@@ -4,14 +4,12 @@ using System.Text.Json;
 namespace App.Api.Services;
 
 /// <summary>
-/// HTTP client to resolve denormalized job metadata from job-svc (PBL6-34 / B-10).
-/// App-svc owns only the application database, so <c>JobTitle</c> for application
-/// events must be fetched over HTTP before publishing.
+/// HTTP client to read job data from job-svc. App-svc owns only the application database, so the
+/// owning company, status and title of a job must be fetched over HTTP.
 ///
-/// Contract: GET {JOB_SERVICE_URL}/api/jobs/{id} -> <c>{ "title": "..." }</c>.
-/// Best-effort: never throws; a disabled client, a non-success status or any
-/// transport error returns an empty title and logs a warning. The notif-svc
-/// template renders an empty title as "[unknown]".
+/// Contract: GET {JOB_SERVICE_URL}/api/internal/jobs/{id} with the internal service token ->
+/// <c>{ "companyId": "...", "status": "Active", "title": "..." }</c>.
+/// Uses the internal endpoint only: the public GET /api/jobs/{id} counts a view on every call.
 /// </summary>
 public class JobServiceClient
 {
@@ -34,94 +32,74 @@ public class JobServiceClient
     public bool Enabled => !string.IsNullOrWhiteSpace(_baseUrl);
 
     /// <summary>
-    /// Returns the job title or an empty string when it cannot be resolved.
-    /// Never throws, so it cannot break the application write path.
+    /// Resolves the job's owning company, status and title. Callers must treat anything other than
+    /// <see cref="JobLookupStatus.Found"/> as a failure: no job data may be assumed.
     /// </summary>
-    public async Task<string> GetJobTitleAsync(Guid jobId, CancellationToken ct = default)
+    public async Task<(JobLookupStatus Status, JobDetails? Job)> GetJobAsync(Guid jobId, CancellationToken ct = default)
     {
-        if (!Enabled)
-        {
-            return string.Empty;
-        }
-
-        try
-        {
-            using var response = await _http.GetAsync($"{_baseUrl}/api/jobs/{jobId}", ct);
-            if (!response.IsSuccessStatusCode)
-            {
-                _logger.LogWarning(
-                    "JobTitle lookup HTTP {Status} for JobId={JobId} at {Url}. Publishing with empty title.",
-                    (int)response.StatusCode, jobId, _baseUrl);
-                return string.Empty;
-            }
-
-            var payload = await response.Content.ReadFromJsonAsync<JobTitleResponse>(JsonOptions, ct);
-            return payload?.Title ?? string.Empty;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(
-                ex, "JobTitle lookup failed (non-blocking) for JobId={JobId} at {Url}. Publishing with empty title.",
-                jobId, _baseUrl);
-            return string.Empty;
-        }
-    }
-
-    /// <summary>
-    /// Authorization lookup: which company owns the job. Unlike <see cref="GetJobTitleAsync"/>
-    /// this is NOT best-effort. Callers must deny access unless the result is
-    /// <see cref="JobCompanyLookupStatus.Found"/> with a matching company.
-    /// </summary>
-    public async Task<(JobCompanyLookupStatus Status, Guid? CompanyId)> GetJobCompanyAsync(Guid jobId, CancellationToken ct = default)
-    {
-        // Fail closed: no job-svc URL or no internal token means no ownership can be proven.
+        // Fail closed: no job-svc URL or no internal token means no job data can be proven.
         if (!Enabled || string.IsNullOrEmpty(_internalToken))
         {
-            return (JobCompanyLookupStatus.Unavailable, null);
+            return (JobLookupStatus.Unavailable, null);
         }
 
         try
         {
-            // Internal endpoint: sees Pending/Rejected jobs that the public GET hides.
-            using var request = new HttpRequestMessage(HttpMethod.Get, $"{_baseUrl}/api/internal/jobs/{jobId}/company");
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"{_baseUrl}/api/internal/jobs/{jobId}");
             request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _internalToken);
             using var response = await _http.SendAsync(request, ct);
             if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
-                return (JobCompanyLookupStatus.NotFound, null);
+                return (JobLookupStatus.NotFound, null);
             }
 
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning(
-                    "Job company lookup HTTP {Status} for JobId={JobId}. Access will be denied.",
-                    (int)response.StatusCode, jobId);
-                return (JobCompanyLookupStatus.Unavailable, null);
+                    "Job lookup HTTP {Status} for JobId={JobId}.", (int)response.StatusCode, jobId);
+                return (JobLookupStatus.Unavailable, null);
             }
 
-            var payload = await response.Content.ReadFromJsonAsync<JobCompanyResponse>(JsonOptions, ct);
-            if (payload?.CompanyId is { } companyId && companyId != Guid.Empty)
+            var payload = await response.Content.ReadFromJsonAsync<JobResponse>(JsonOptions, ct);
+            if (payload is null || payload.CompanyId == Guid.Empty || string.IsNullOrWhiteSpace(payload.Status))
             {
-                return (JobCompanyLookupStatus.Found, companyId);
+                _logger.LogWarning("Job lookup returned an incomplete body for JobId={JobId}.", jobId);
+                return (JobLookupStatus.Unavailable, null);
             }
 
-            return (JobCompanyLookupStatus.Unavailable, null);
+            if (!Enum.TryParse<JobStatus>(payload.Status, ignoreCase: false, out var status))
+            {
+                _logger.LogWarning("Job lookup returned unknown status {Status} for JobId={JobId}.", payload.Status, jobId);
+                return (JobLookupStatus.Unavailable, null);
+            }
+
+            return (JobLookupStatus.Found, new JobDetails(payload.CompanyId, status, payload.Title ?? string.Empty));
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Job company lookup failed for JobId={JobId}. Access will be denied.", jobId);
-            return (JobCompanyLookupStatus.Unavailable, null);
+            _logger.LogWarning(ex, "Job lookup failed for JobId={JobId}.", jobId);
+            return (JobLookupStatus.Unavailable, null);
         }
     }
 
-    private sealed record JobTitleResponse(string? Title);
-
-    private sealed record JobCompanyResponse(Guid? CompanyId);
+    private sealed record JobResponse(Guid CompanyId, string? Status, string? Title);
 }
 
-public enum JobCompanyLookupStatus
+public enum JobLookupStatus
 {
     Found,
     NotFound,
     Unavailable,
+}
+
+/// <summary>Job data as known to job-svc. <see cref="Status"/> mirrors job-svc's JobStatus names.</summary>
+public sealed record JobDetails(Guid CompanyId, JobStatus Status, string Title);
+
+public enum JobStatus
+{
+    Active,
+    Closed,
+    Deleted,
+    Pending,
+    Rejected,
 }

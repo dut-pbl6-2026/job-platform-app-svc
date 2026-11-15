@@ -9,19 +9,24 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace App.Tests;
 
 /// <summary>
-/// Fake job-svc for ownership checks. Every job id resolves to <see cref="CompanyId"/>
-/// unless a test builds a client with a different responder.
+/// Fake job-svc internal lookup. Every job id resolves to <see cref="CompanyId"/>, an Active job
+/// and <see cref="Title"/>, unless a test builds a client with a different responder.
 /// </summary>
 internal static class TestJobCompany
 {
     public static readonly Guid CompanyId = Guid.Parse("c0a0c0a0-0000-4000-8000-00000000000a");
     public static readonly Guid OtherCompanyId = Guid.Parse("c0b0c0b0-0000-4000-8000-00000000000b");
+    public const string Title = "Senior .NET Developer";
 
-    /// <summary>Client that answers every job lookup with <see cref="CompanyId"/>.</summary>
+    /// <summary>Client that answers every job lookup with <see cref="CompanyId"/> and an Active job.</summary>
     public static JobServiceClient Owned() => Create(_ => Json(HttpStatusCode.OK, CompanyId));
 
-    /// <summary>Client that answers every job lookup with <paramref name="companyId"/>.</summary>
+    /// <summary>Client that answers every job lookup with <paramref name="companyId"/> and an Active job.</summary>
     public static JobServiceClient ForCompany(Guid companyId) => Create(_ => Json(HttpStatusCode.OK, companyId));
+
+    /// <summary>Client that answers every job lookup with a job in <paramref name="jobStatus"/>.</summary>
+    public static JobServiceClient WithJobStatus(string jobStatus) =>
+        Create(_ => Json(HttpStatusCode.OK, CompanyId, jobStatus));
 
     /// <summary>Client whose job-svc responds with a server error, to test fail-closed behaviour.</summary>
     public static JobServiceClient Down() => Create(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
@@ -47,10 +52,11 @@ internal static class TestJobCompany
         return ctx;
     }
 
-    private static HttpResponseMessage Json(HttpStatusCode status, Guid companyId) =>
+    private static HttpResponseMessage Json(HttpStatusCode status, Guid companyId, string jobStatus = "Active") =>
         new(status)
         {
-            Content = new StringContent($"{{\"id\":\"00000000-0000-0000-0000-000000000001\",\"companyId\":\"{companyId}\"}}",
+            Content = new StringContent(
+                $"{{\"companyId\":\"{companyId}\",\"status\":\"{jobStatus}\",\"title\":\"{Title}\"}}",
                 Encoding.UTF8, "application/json"),
         };
 
@@ -67,6 +73,18 @@ internal static class TestJobCompany
             return Json(HttpStatusCode.OK, CompanyId);
         });
         return (client, () => last);
+    }
+
+    /// <summary>Client that records the path of every request it receives, for asserting which job-svc endpoints are called.</summary>
+    public static (JobServiceClient Client, List<string> Paths) RecordingPaths()
+    {
+        var paths = new List<string>();
+        var client = Create(req =>
+        {
+            paths.Add(req.RequestUri!.AbsolutePath);
+            return Json(HttpStatusCode.OK, CompanyId);
+        });
+        return (client, paths);
     }
 
     private static JobServiceClient Create(Func<HttpRequestMessage, HttpResponseMessage> responder, string? token = "test-internal-token")
