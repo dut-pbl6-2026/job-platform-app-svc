@@ -231,6 +231,24 @@ public sealed class InternalApplicationsEndpointTests : IDisposable
         Assert.Equal(201, StatusOf(result));
     }
 
+    [Fact]
+    public async Task AuthCallerToken_IsRejected_EvenWhenConfigured()
+    {
+        // Only job-svc's token opens this endpoint; the token issued to auth-svc must not.
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                [InternalServiceAuth.JobCallerTokenKey] = Token,
+                [InternalStatsEndpoints.AuthCallerTokenKey] = "test-auth-caller-token",
+            })
+            .Build();
+
+        var result = await InternalApplicationsEndpoints.GetApplications(
+            Authorized("Bearer test-auth-caller-token"), _db, config, NullLoggerFactory.Instance, null, null);
+
+        Assert.Equal(401, StatusOf(result));
+    }
+
     private Task<IResult> Invoke(
         HttpContext ctx, string? configuredToken = Token, int? page = null, int? size = null) =>
         InternalApplicationsEndpoints.GetApplications(
@@ -240,7 +258,7 @@ public sealed class InternalApplicationsEndpointTests : IDisposable
         new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                [InternalServiceAuth.TokenConfigKey] = token,
+                [InternalServiceAuth.JobCallerTokenKey] = token,
             })
             .Build();
 

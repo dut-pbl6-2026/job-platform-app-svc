@@ -7,7 +7,7 @@ namespace App.Api.Services;
 /// HTTP client to read job data from job-svc. App-svc owns only the application database, so the
 /// owning company, status and title of a job must be fetched over HTTP.
 ///
-/// Contract: GET {JOB_SERVICE_URL}/api/internal/jobs/{id} with the internal service token ->
+/// Contract: GET {JOB_SERVICE_URL}/api/internal/jobs/{id} with the JOB_INTERNAL_TOKEN_FOR_APP token ->
 /// <c>{ "companyId": "...", "status": "Active", "title": "..." }</c>.
 /// Uses the internal endpoint only: the public GET /api/jobs/{id} counts a view on every call.
 /// </summary>
@@ -24,7 +24,7 @@ public class JobServiceClient
     {
         _http = http;
         _baseUrl = (configuration["JOB_SERVICE_URL"] ?? configuration["JobService:Url"] ?? "").Trim().TrimEnd('/');
-        _internalToken = (configuration["INTERNAL_SERVICE_TOKEN"] ?? "").Trim();
+        _internalToken = (configuration["JOB_INTERNAL_TOKEN_FOR_APP"] ?? "").Trim();
         _logger = logger;
     }
 

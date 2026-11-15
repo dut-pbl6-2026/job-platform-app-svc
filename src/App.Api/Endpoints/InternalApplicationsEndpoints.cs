@@ -8,7 +8,7 @@ namespace App.Api.Endpoints;
 /// Service-to-service export of applications (PBL6-10). job-svc reads it once at startup to
 /// backfill its recommendation read model with applications older than Kafka retention.
 /// Not exposed through the gateway: callers must present
-/// <c>Authorization: Bearer &lt;INTERNAL_SERVICE_TOKEN&gt;</c>.
+/// <c>Authorization: Bearer &lt;APP_INTERNAL_TOKEN_FOR_JOB&gt;</c> (job-svc is the only caller).
 /// </summary>
 public static class InternalApplicationsEndpoints
 {
@@ -38,7 +38,7 @@ public static class InternalApplicationsEndpoints
         CancellationToken ct = default)
     {
         var denied = InternalServiceAuth.Authorize(
-            ctx, config, loggerFactory.CreateLogger("InternalApplicationsEndpoints"));
+            ctx, config, InternalServiceAuth.JobCallerTokenKey, loggerFactory.CreateLogger("InternalApplicationsEndpoints"));
         if (denied is not null)
         {
             return denied;

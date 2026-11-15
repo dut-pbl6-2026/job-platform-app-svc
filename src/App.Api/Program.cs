@@ -1,5 +1,6 @@
 using System.Text;
 using App.Api.Bootstrap;
+using App.Api.Auth;
 using App.Api.Endpoints;
 using App.Api.Middleware;
 using App.Api.Observability;
@@ -83,6 +84,16 @@ builder.Services.AddHostedService<OutboxPublisherService>();
 // Automatic CV scoring: ai-svc scores each new application against its job (no third-party AI API).
 // The timeout bounds one call; the worker lease (ResumeScoringWorkerService.LeaseDuration) covers a full batch.
 // Registered as a singleton too, so tests can run a scoring cycle directly.
+// Per-caller internal tokens: app-svc accepts job-svc and auth-svc only with their own tokens.
+// Outside Development a missing accept-side value fails startup.
+if (!builder.Environment.IsDevelopment() &&
+    (string.IsNullOrWhiteSpace(builder.Configuration[InternalServiceAuth.JobCallerTokenKey])
+     || string.IsNullOrWhiteSpace(builder.Configuration[InternalServiceAuth.AuthCallerTokenKey])))
+{
+    throw new InvalidOperationException(
+        "APP_INTERNAL_TOKEN_FOR_JOB and APP_INTERNAL_TOKEN_FOR_AUTH are required outside Development");
+}
+
 // Production refuses a short token instead of silently sending a weak one. An unset token leaves scoring disabled.
 var scoringToken = (builder.Configuration["AI_SCORING_SERVICE_TOKEN"] ?? "").Trim();
 if (builder.Environment.IsProduction()

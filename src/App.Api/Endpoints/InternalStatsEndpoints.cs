@@ -8,12 +8,12 @@ namespace App.Api.Endpoints;
 /// <summary>
 /// Service-to-service application stats endpoint used by the admin dashboard
 /// aggregation (feat(admin) Slice 6). Not exposed through the gateway: callers must
-/// present <c>Authorization: Bearer &lt;INTERNAL_SERVICE_TOKEN&gt;</c>.
+/// present <c>Authorization: Bearer &lt;APP_INTERNAL_TOKEN_FOR_AUTH&gt;</c> (auth-svc is the only caller).
 /// </summary>
 public static class InternalStatsEndpoints
 {
-    /// <summary>Configuration/env key holding the shared internal service token.</summary>
-    public const string TokenConfigKey = InternalServiceAuth.TokenConfigKey;
+    /// <summary>Configuration/env key holding the token auth-svc presents on this endpoint.</summary>
+    public const string AuthCallerTokenKey = InternalServiceAuth.AuthCallerTokenKey;
 
     public static WebApplication MapInternalStatsEndpoints(this WebApplication app)
     {
@@ -31,7 +31,7 @@ public static class InternalStatsEndpoints
         CancellationToken ct = default)
     {
         var denied = InternalServiceAuth.Authorize(
-            ctx, config, loggerFactory.CreateLogger("InternalStatsEndpoints"));
+            ctx, config, AuthCallerTokenKey, loggerFactory.CreateLogger("InternalStatsEndpoints"));
         if (denied is not null)
         {
             return denied;
