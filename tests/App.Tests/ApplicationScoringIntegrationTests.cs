@@ -139,6 +139,34 @@ public class ApplicationScoringIntegrationTests : IDisposable
     }
 
     [Fact]
+    public async Task PutStatusWithScore_IsIgnored_AndTheRecruiterScoreComesOnlyFromTheScoringJob()
+    {
+        var f = NewFactory();
+        var jobId = Guid.NewGuid();
+        var (applicationId, _) = await ApplyAsync(f, jobId);
+        var recruiter = As(f, Guid.NewGuid(), "Recruiter", linkedToOwnedCompany: true);
+
+        var response = await recruiter.PutAsJsonAsync(
+            $"/api/applications/{applicationId}/status",
+            new { status = "reviewed", note = "Passed screening", score = 42 });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(body.TryGetProperty("score", out _));
+
+        // Right after the update the recruiter sees no score yet: the manual 42 was not stored anywhere.
+        var before = await recruiter.GetFromJsonAsync<JsonElement>($"/api/applications/{applicationId}");
+        Assert.Equal(JsonValueKind.Null, before.GetProperty("score").ValueKind);
+        Assert.Equal("pending", before.GetProperty("scoreStatus").GetString());
+
+        // The automatic score is the only recruiter-visible score.
+        f.ScoringClient.Score = 77;
+        await RunWorkerCycleAsync(f);
+        var after = await recruiter.GetFromJsonAsync<JsonElement>($"/api/applications/{applicationId}");
+        Assert.Equal(77, after.GetProperty("score").GetDouble());
+    }
+
+    [Fact]
     public async Task RecruiterSeesPendingStatus_BeforeTheWorkerRuns()
     {
         var f = NewFactory();

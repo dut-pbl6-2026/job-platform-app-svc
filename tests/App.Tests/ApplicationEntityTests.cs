@@ -22,7 +22,6 @@ public class ApplicationEntityTests
         Assert.Equal(coverLetter, app.CoverLetter);
         Assert.Equal(ApplicationStatus.Pending, app.Status);
         Assert.Null(app.RecruiterNotes);
-        Assert.Null(app.Score);
 
         // Status history must have initial pending record
         Assert.Single(app.StatusHistories);
@@ -71,15 +70,13 @@ public class ApplicationEntityTests
     }
 
     [Fact]
-    public void SetRecruiterNotes_And_SetScore_UpdatesProperties()
+    public void SetRecruiterNotes_UpdatesNotes()
     {
         var app = new Application(Guid.NewGuid(), Guid.NewGuid(), "/cv.pdf");
 
         app.SetRecruiterNotes("Top candidate for interview round 2");
-        app.SetScore(85.5);
 
         Assert.Equal("Top candidate for interview round 2", app.RecruiterNotes);
-        Assert.Equal(85.5, app.Score);
     }
 
     [Fact]
@@ -206,36 +203,6 @@ public class ApplicationEntityTests
         Assert.Contains("Recruiter notes cannot exceed", ex.Message);
     }
 
-    [Theory]
-    [InlineData(-0.1)]
-    [InlineData(-10.0)]
-    [InlineData(100.1)]
-    [InlineData(150.0)]
-    public void SetScore_OutOfRange_ThrowsArgumentOutOfRangeException(double invalidScore)
-    {
-        var app = new Application(Guid.NewGuid(), Guid.NewGuid(), "/cv.pdf");
-
-        Assert.Throws<ArgumentOutOfRangeException>(() => app.SetScore(invalidScore));
-    }
-
-    [Fact]
-    public void SetScore_ValidRange_Succeeds()
-    {
-        var app = new Application(Guid.NewGuid(), Guid.NewGuid(), "/cv.pdf");
-
-        app.SetScore(0.0);
-        Assert.Equal(0.0, app.Score);
-
-        app.SetScore(100.0);
-        Assert.Equal(100.0, app.Score);
-
-        app.SetScore(85.5);
-        Assert.Equal(85.5, app.Score);
-
-        app.SetScore(null);
-        Assert.Null(app.Score);
-    }
-
     // Full transition matrix, written out from the SRS state machine (pending -> reviewed -> shortlisted ->
     // accepted, rejected from any non-terminal stage). Every ordered pair is checked, not just a sample.
     public static IEnumerable<object[]> AllStatusPairs()
@@ -290,7 +257,7 @@ public class ApplicationEntityTests
         app.SetRecruiterNotes("Strong portfolio");
         Assert.Equal(2, app.RowVersion);
 
-        app.SetScore(80);
+        app.SetRecruiterNotes("Follow up next week");
         Assert.Equal(3, app.RowVersion);
     }
 

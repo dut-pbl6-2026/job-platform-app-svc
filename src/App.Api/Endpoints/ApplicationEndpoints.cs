@@ -645,11 +645,6 @@ public static class ApplicationEndpoints
             errors["recruiter_notes"] = [$"Recruiter notes exceed maximum length of {Application.RecruiterNotesMaxLength} characters."];
         }
 
-        if (req.Score.HasValue && (req.Score.Value < Application.MinScore || req.Score.Value > Application.MaxScore || double.IsNaN(req.Score.Value) || double.IsInfinity(req.Score.Value)))
-        {
-            errors["score"] = [$"Score must be between {Application.MinScore} and {Application.MaxScore}."];
-        }
-
         if (errors.Count > 0)
         {
             return Results.ValidationProblem(errors);
@@ -686,11 +681,6 @@ public static class ApplicationEndpoints
         if (req.RecruiterNotes is not null)
         {
             application.SetRecruiterNotes(req.RecruiterNotes);
-        }
-
-        if (req.Score.HasValue)
-        {
-            application.SetScore(req.Score.Value);
         }
 
         // Resolved before the save so the event row carries the title. Best-effort: empty when job-svc fails.

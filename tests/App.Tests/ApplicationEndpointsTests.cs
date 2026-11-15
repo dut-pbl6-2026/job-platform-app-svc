@@ -332,10 +332,10 @@ public class ApplicationEndpointsTests : IDisposable
             app.Id, new UpdateStatusRequest("shortlisted", "Invite to technical round"), _db, recruiterCtx, jobClient: _jobClient);
         Assert.Equal(200, (res2 as IStatusCodeHttpResult)?.StatusCode);
 
-        // 3. Shortlisted -> Accepted (with score & notes)
+        // 3. Shortlisted -> Accepted (with notes)
         var res3 = await ApplicationEndpoints.UpdateApplicationStatus(
             app.Id,
-            new UpdateStatusRequest("accepted", "Offer accepted by candidate", "Hired as Mid-level Dev", 92.5),
+            new UpdateStatusRequest("accepted", "Offer accepted by candidate", "Hired as Mid-level Dev"),
             _db,
             recruiterCtx, jobClient: _jobClient);
         Assert.Equal(200, (res3 as IStatusCodeHttpResult)?.StatusCode);
@@ -343,7 +343,6 @@ public class ApplicationEndpointsTests : IDisposable
         // Verify final state
         var finalApp = await _db.Applications.Include(a => a.StatusHistories).FirstAsync(a => a.Id == app.Id);
         Assert.Equal(ApplicationStatus.Accepted, finalApp.Status);
-        Assert.Equal(92.5, finalApp.Score);
         Assert.Equal("Hired as Mid-level Dev", finalApp.RecruiterNotes);
         Assert.Equal(4, finalApp.StatusHistories.Count);
     }
@@ -727,25 +726,6 @@ public class ApplicationEndpointsTests : IDisposable
         var statusCodeResult = result as IStatusCodeHttpResult;
         Assert.NotNull(statusCodeResult);
         Assert.Equal(409, statusCodeResult.StatusCode);
-    }
-
-    [Theory]
-    [InlineData(-1.0)]
-    [InlineData(101.0)]
-    public async Task UpdateApplicationStatus_ScoreOutOfRange_Returns400ValidationProblem(double invalidScore)
-    {
-        var app = new Application(_jobId, _applicantId, "/cv.pdf");
-        _db.Applications.Add(app);
-        await _db.SaveChangesAsync();
-
-        var recruiterCtx = BuildContext(_recruiterId, "Recruiter");
-        var updateReq = new UpdateStatusRequest("reviewed", "Valid note", Score: invalidScore);
-
-        var result = await ApplicationEndpoints.UpdateApplicationStatus(app.Id, updateReq, _db, recruiterCtx, jobClient: _jobClient);
-
-        var statusCodeResult = result as IStatusCodeHttpResult;
-        Assert.NotNull(statusCodeResult);
-        Assert.Equal(400, statusCodeResult.StatusCode);
     }
 
     [Fact]
