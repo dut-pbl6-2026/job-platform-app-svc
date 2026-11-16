@@ -119,6 +119,13 @@ builder.Services.AddHttpClient<JobServiceClient>(client =>
     client.Timeout = TimeSpan.FromSeconds(5);
 });
 
+// Recruiter email and interview invites leave through notif-svc, which owns SMTP. A missing URL or
+// shared token disables sending (interviews are still saved and the API reports inviteSent=false).
+builder.Services.AddHttpClient<NotifEmailClient>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(10);
+});
+
 // Auth config: RS256 access tokens from auth-svc, keys from its JWKS (Jwt__MetadataAddress). No shared secret.
 if (!builder.Environment.IsDevelopment())
 {
@@ -186,6 +193,7 @@ app.MapGet("/", () => Results.Ok(new { service = "application", version = "0.1.0
 
 // Register application endpoints
 app.MapApplicationEndpoints();
+app.MapEngagementEndpoints();
 app.MapInternalStatsEndpoints();
 app.MapInternalApplicationsEndpoints();
 

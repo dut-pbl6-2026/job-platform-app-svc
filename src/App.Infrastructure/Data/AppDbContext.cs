@@ -11,6 +11,8 @@ public class AppDbContext : DbContext
     public DbSet<StatusHistory> StatusHistories => Set<StatusHistory>();
     public DbSet<OutboxEvent> OutboxEvents => Set<OutboxEvent>();
     public DbSet<ScoringJob> ScoringJobs => Set<ScoringJob>();
+    public DbSet<EmailTemplate> EmailTemplates => Set<EmailTemplate>();
+    public DbSet<Interview> Interviews => Set<Interview>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -27,6 +29,8 @@ public class AppDbContext : DbContext
             e.Property(x => x.CvUrl).HasMaxLength(Application.CvUrlMaxLength).IsRequired();
             e.Property(x => x.CoverLetter).HasMaxLength(Application.CoverLetterMaxLength);
             e.Property(x => x.RecruiterNotes).HasMaxLength(Application.RecruiterNotesMaxLength);
+            e.Property(x => x.ApplicantName).HasMaxLength(Application.ApplicantNameMaxLength);
+            e.Property(x => x.ApplicantEmail).HasMaxLength(Application.ApplicantEmailMaxLength);
             e.Property(x => x.CreatedAt).IsRequired();
             e.Property(x => x.UpdatedAt).IsRequired();
 
@@ -104,6 +108,65 @@ public class AppDbContext : DbContext
                 .WithOne(x => x.ScoringJob)
                 .HasForeignKey<ScoringJob>(x => x.ApplicationId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<EmailTemplate>(e =>
+        {
+            e.ToTable("email_templates");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+
+            e.Property(x => x.RecruiterId).IsRequired();
+            e.Property(x => x.Name).HasMaxLength(EmailTemplate.NameMaxLength).IsRequired();
+            e.Property(x => x.Subject).HasMaxLength(EmailTemplate.SubjectMaxLength).IsRequired();
+            e.Property(x => x.Body).HasMaxLength(EmailTemplate.BodyMaxLength).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            // The template manager lists one recruiter's templates, newest first.
+            e.HasIndex(x => new { x.RecruiterId, x.UpdatedAt })
+                .HasDatabaseName("IX_email_templates_recruiter_updated");
+        });
+
+        b.Entity<Interview>(e =>
+        {
+            e.ToTable("interviews");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+
+            e.Property(x => x.ApplicationId).IsRequired();
+            e.Property(x => x.JobId).IsRequired();
+            e.Property(x => x.JobTitle).HasMaxLength(Interview.JobTitleMaxLength).IsRequired();
+            e.Property(x => x.CompanyId).IsRequired();
+
+            e.Property(x => x.ApplicantId).IsRequired();
+            e.Property(x => x.ApplicantName).HasMaxLength(Interview.NameMaxLength);
+            e.Property(x => x.ApplicantEmail).HasMaxLength(Interview.EmailMaxLength).IsRequired();
+
+            e.Property(x => x.RecruiterId).IsRequired();
+            e.Property(x => x.RecruiterName).HasMaxLength(Interview.NameMaxLength);
+            e.Property(x => x.RecruiterEmail).HasMaxLength(Interview.EmailMaxLength).IsRequired();
+
+            e.Property(x => x.StartsAtUtc).IsRequired();
+            e.Property(x => x.DurationMinutes).IsRequired();
+            e.Property(x => x.Mode)
+                .HasConversion<string>()
+                .HasMaxLength(16)
+                .IsRequired();
+            e.Property(x => x.Location).HasMaxLength(Interview.LocationMaxLength);
+            e.Property(x => x.Notes).HasMaxLength(Interview.NotesMaxLength);
+            e.Property(x => x.Status)
+                .HasConversion<string>()
+                .HasMaxLength(16)
+                .IsRequired();
+            e.Property(x => x.CalendarUid).HasMaxLength(Interview.UidMaxLength).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            e.HasIndex(x => x.ApplicantId).HasDatabaseName("IX_interviews_applicant_id");
+            e.HasIndex(x => x.RecruiterId).HasDatabaseName("IX_interviews_recruiter_id");
+            e.HasIndex(x => x.StartsAtUtc).HasDatabaseName("IX_interviews_starts_at");
+            e.HasIndex(x => x.ApplicationId).HasDatabaseName("IX_interviews_application_id");
         });
 
         b.Entity<OutboxEvent>(e =>

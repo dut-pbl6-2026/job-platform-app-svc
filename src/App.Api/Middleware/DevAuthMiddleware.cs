@@ -46,6 +46,16 @@ public class DevAuthMiddleware
                 var company = context.Request.Headers["X-User-Company"].FirstOrDefault();
                 if (Guid.TryParse(company, out var companyId) && companyId != Guid.Empty)
                     claims.Add(new Claim("company_id", companyId.ToString()));
+
+                // Identity snapshotted on applications and used as the interview organiser. Forwarded by
+                // the gateway from the verified token, never trusted from the client.
+                var email = context.Request.Headers["X-User-Email"].FirstOrDefault();
+                if (!string.IsNullOrWhiteSpace(email))
+                    claims.Add(new Claim(ClaimTypes.Email, email));
+
+                var name = context.Request.Headers["X-User-Name"].FirstOrDefault();
+                if (!string.IsNullOrWhiteSpace(name))
+                    claims.Add(new Claim("full_name", Uri.UnescapeDataString(name)));
                 context.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Gateway"));
             }
         }

@@ -7,9 +7,19 @@ public class Application : Entity
     public const int CoverLetterMaxLength = 4000;
     public const int CvUrlMaxLength = 1024;
     public const int RecruiterNotesMaxLength = 2000;
+    public const int ApplicantNameMaxLength = 200;
+    public const int ApplicantEmailMaxLength = 320;
 
     public Guid JobId { get; private set; }
     public Guid ApplicantId { get; private set; }
+
+    /// <summary>
+    /// Candidate identity as presented in the access token when the application was submitted. Kept on
+    /// the row so recruiters can address an email without reading another service. Null when an older
+    /// application was submitted before these claims were forwarded.
+    /// </summary>
+    public string? ApplicantName { get; private set; }
+    public string? ApplicantEmail { get; private set; }
     public string? CoverLetter { get; private set; }
     public string CvUrl { get; private set; } = string.Empty;
     public ApplicationStatus Status { get; private set; } = ApplicationStatus.Pending;
@@ -29,7 +39,13 @@ public class Application : Entity
     // EF Core parameterless constructor
     protected Application() { }
 
-    public Application(Guid jobId, Guid applicantId, string cvUrl, string? coverLetter = null)
+    public Application(
+        Guid jobId,
+        Guid applicantId,
+        string cvUrl,
+        string? coverLetter = null,
+        string? applicantName = null,
+        string? applicantEmail = null)
     {
         if (jobId == Guid.Empty)
             throw new ArgumentException("JobId is required.", nameof(jobId));
@@ -42,6 +58,8 @@ public class Application : Entity
         ApplicantId = applicantId;
         CvUrl = cvUrl.Trim();
         CoverLetter = coverLetter?.Trim();
+        ApplicantName = Normalize(applicantName, ApplicantNameMaxLength);
+        ApplicantEmail = Normalize(applicantEmail, ApplicantEmailMaxLength);
         Status = ApplicationStatus.Pending;
 
         // Record initial status in history
@@ -94,6 +112,22 @@ public class Application : Entity
         var history = new StatusHistory(Id, newStatus, changedBy, note);
         StatusHistories.Add(history);
         return history;
+    }
+
+    /// <summary>Backfills the candidate identity on an application submitted before it was captured.</summary>
+    public void SetApplicantIdentity(string? name, string? email)
+    {
+        ApplicantName = Normalize(name, ApplicantNameMaxLength);
+        ApplicantEmail = Normalize(email, ApplicantEmailMaxLength);
+    }
+
+    private static string? Normalize(string? value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        var trimmed = value.Trim();
+        return trimmed.Length <= maxLength ? trimmed : trimmed[..maxLength];
     }
 
     public void SetRecruiterNotes(string? notes)

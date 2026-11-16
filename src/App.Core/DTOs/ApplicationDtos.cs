@@ -61,7 +61,9 @@ public record RecruiterApplicationSummaryDto(
     double? Score,
     string? ScoreStatus,
     DateTime CreatedAt,
-    DateTime UpdatedAt
+    DateTime UpdatedAt,
+    string? ApplicantName = null,
+    string? ApplicantEmail = null
 );
 
 public record StatusHistoryDto(

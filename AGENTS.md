@@ -37,3 +37,23 @@ Dependency: `Api -> Infrastructure -> Core -> SharedKernel` (`PackageReference J
 - Counted failures back off (30 s, doubling, capped at 15 min); after 8 the row is Failed and logged at Error with its id. Rate limit or busy responses are not counted.
 - Recruiters see `score` and `scoreStatus` (pending, done, failed) on the job list and the detail. Applicants never see either. Applications created before scoring have no row: `scoreStatus` is null.
 
+## Engagement: templates, email and interviews
+
+- `email_templates` (per recruiter: name, subject, body; private to the author) and `interviews`
+  (application/job/company snapshot, candidate and recruiter identity, UTC start, duration, mode,
+  location, notes, status, stable calendar UID) are owned by app-svc. Migration:
+  `AddInterviewsAndEmailTemplates`.
+- Applications now snapshot `ApplicantName` / `ApplicantEmail` from the verified token at submission.
+  The gateway forwards `X-User-Email` / `X-User-Name` (percent-encoded) to dev-auth services; production
+  reads the JWT `email` and `full_name` claims. Older rows are backfilled by the demo seed.
+- `GET/POST /api/email-templates`, `PUT/DELETE /api/email-templates/{id}` — recruiter only, own rows.
+- `POST /api/applications/{id}/email` — subject/body (`{{candidate_name}}`, `{{job_title}}`,
+  `{{recruiter_name}}` resolved server-side), delivered through notif-svc's
+  `POST /api/internal/email`. A delivery failure returns 502 and sends nothing.
+- `GET/POST /api/interviews`, `GET/PUT /api/interviews/{id}`, `POST /api/interviews/{id}/cancel`,
+  `GET /api/interviews/{id}/ics` — recruiters schedule/reschedule/cancel for jobs their company owns;
+  participants (candidate, recruiter, admin) read and download. The `.ics` is built in app-svc
+  (`IcsBuilder`, RFC 5545, UTC, folded at 75 octets) and mailed as a `text/calendar` attachment.
+  Invites are best-effort: the interview is saved first, and the response carries `inviteSent`.
+- Configuration: `NOTIF_SERVICE_URL`, `NOTIF_INTERNAL_TOKEN` (shared with notif-svc). Missing values
+  disable sending; interviews still save.

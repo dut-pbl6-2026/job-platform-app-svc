@@ -48,7 +48,7 @@ public static class ApplicationEndpoints
         return app;
     }
 
-    private static (Guid? UserId, string Role) GetIdentity(HttpContext ctx)
+    internal static (Guid? UserId, string Role) GetIdentity(HttpContext ctx)
     {
         var idStr = ctx.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
                     ?? ctx.User.FindFirst("sub")?.Value;
@@ -81,26 +81,45 @@ public static class ApplicationEndpoints
     /// the job's CompanyId from job-svc. Admins are not restricted. Fails closed: a recruiter without a
     /// company claim, a missing job-svc client, or a failed lookup is denied. Returns null when allowed.
     /// </summary>
-    private static async Task<IResult?> EnsureRecruiterOwnsJobAsync(
+    internal static async Task<IResult?> EnsureRecruiterOwnsJobAsync(
+        HttpContext ctx, string role, Guid jobId, JobServiceClient? jobClient)
+    {
+        var (denied, _) = await ResolveOwnedJobAsync(ctx, role, jobId, jobClient);
+        return denied;
+    }
+
+    /// <summary>
+    /// Ownership check that also returns the resolved job, so a caller that needs the title or company
+    /// (interviews, email) does not pay for a second job-svc lookup.
+    /// </summary>
+    internal static async Task<(IResult? Denied, JobDetails? Job)> ResolveOwnedJobAsync(
         HttpContext ctx, string role, Guid jobId, JobServiceClient? jobClient)
     {
         if (role.Equals("Admin", StringComparison.OrdinalIgnoreCase))
-            return null;
+        {
+            // Admins are never restricted by company. The job read is best-effort: callers that need the
+            // title (interviews) get it when available, and an admin action is not blocked by job-svc.
+            if (jobClient is null)
+                return (null, null);
+
+            var (adminStatus, adminJob) = await jobClient.GetJobAsync(jobId, ctx.RequestAborted);
+            return (null, adminStatus == JobLookupStatus.Found ? adminJob : null);
+        }
 
         var companyClaim = ctx.User.FindFirst("company_id")?.Value;
         if (!Guid.TryParse(companyClaim, out var recruiterCompanyId) || recruiterCompanyId == Guid.Empty)
-            return ForbiddenResult("Your account is not linked to a company.");
+            return (ForbiddenResult("Your account is not linked to a company."), null);
 
         if (jobClient is null)
-            return Results.Problem(detail: "Job ownership cannot be verified right now.", statusCode: StatusCodes.Status503ServiceUnavailable);
+            return (Results.Problem(detail: "Job ownership cannot be verified right now.", statusCode: StatusCodes.Status503ServiceUnavailable), null);
 
         var (status, job) = await jobClient.GetJobAsync(jobId, ctx.RequestAborted);
         return status switch
         {
-            JobLookupStatus.Found when job!.CompanyId == recruiterCompanyId => null,
-            JobLookupStatus.Found => ForbiddenResult("You can only access applications for jobs from your company."),
-            JobLookupStatus.NotFound => Results.NotFound(new { message = "Job not found." }),
-            _ => Results.Problem(detail: "Job ownership cannot be verified right now.", statusCode: StatusCodes.Status503ServiceUnavailable),
+            JobLookupStatus.Found when job!.CompanyId == recruiterCompanyId => (null, job),
+            JobLookupStatus.Found => (ForbiddenResult("You can only access applications for jobs from your company."), null),
+            JobLookupStatus.NotFound => (Results.NotFound(new { message = "Job not found." }), null),
+            _ => (Results.Problem(detail: "Job ownership cannot be verified right now.", statusCode: StatusCodes.Status503ServiceUnavailable), null),
         };
     }
 
@@ -214,7 +233,13 @@ public static class ApplicationEndpoints
             return Results.BadRequest(new { message = ex.Message });
         }
 
-        var application = new Application(jobId, userId.Value, cvUrl, coverLetter);
+        var applicantEmail = ctx.User.FindFirst(ClaimTypes.Email)?.Value
+                              ?? ctx.User.FindFirst("email")?.Value;
+        var applicantName = ctx.User.FindFirst("full_name")?.Value
+                            ?? ctx.User.FindFirst(ClaimTypes.Name)?.Value
+                            ?? ctx.User.FindFirst("name")?.Value;
+
+        var application = new Application(jobId, userId.Value, cvUrl, coverLetter, applicantName, applicantEmail);
         db.Applications.Add(application);
         // Same SaveChanges as the application row: the event commits with the application or not at all.
         db.OutboxEvents.Add(ApplicationOutboxEvents.Submitted(application, job!.Title));
@@ -585,6 +610,8 @@ public static class ApplicationEndpoints
                 a.UpdatedAt,
                 ScoringStatus = (ScoringStatus?)a.ScoringJob!.Status,
                 Score = a.ScoringJob!.Score,
+                a.ApplicantName,
+                a.ApplicantEmail,
             })
             .ToListAsync();
 
@@ -599,7 +626,9 @@ public static class ApplicationEndpoints
                 r.Score,
                 ToScoreStatus(r.ScoringStatus),
                 r.CreatedAt,
-                r.UpdatedAt))
+                r.UpdatedAt,
+                r.ApplicantName,
+                r.ApplicantEmail))
             .ToList();
 
         return Results.Ok(new PaginatedResponse<RecruiterApplicationSummaryDto>(items, total, pageIndex + 1, pageSize));
