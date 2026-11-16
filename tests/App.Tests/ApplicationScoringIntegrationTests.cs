@@ -167,6 +167,37 @@ public class ApplicationScoringIntegrationTests : IDisposable
     }
 
     [Fact]
+    public async Task ScoredApplication_ApplicantResponsesHaveNoScoreKeys_RecruiterResponsesDo()
+    {
+        var f = NewFactory();
+        var jobId = Guid.NewGuid();
+        var (applicationId, applicantId) = await ApplyAsync(f, jobId);
+        f.ScoringClient.Score = 83;
+        await RunWorkerCycleAsync(f);
+
+        var applicant = As(f, applicantId, "User");
+        var detail = await applicant.GetFromJsonAsync<JsonElement>($"/api/applications/{applicationId}");
+        Assert.False(detail.TryGetProperty("score", out _));
+        Assert.False(detail.TryGetProperty("scoreStatus", out _));
+
+        var mine = await applicant.GetFromJsonAsync<JsonElement>("/api/applications/me");
+        var summary = Assert.Single(mine.GetProperty("items").EnumerateArray());
+        Assert.Equal(applicationId, summary.GetProperty("id").GetGuid());
+        Assert.False(summary.TryGetProperty("score", out _));
+        Assert.False(summary.TryGetProperty("scoreStatus", out _));
+
+        var recruiter = As(f, Guid.NewGuid(), "Recruiter", linkedToOwnedCompany: true);
+        var recruiterDetail = await recruiter.GetFromJsonAsync<JsonElement>($"/api/applications/{applicationId}");
+        Assert.Equal(83, recruiterDetail.GetProperty("score").GetDouble());
+        Assert.Equal("done", recruiterDetail.GetProperty("scoreStatus").GetString());
+
+        var jobApplications = await recruiter.GetFromJsonAsync<JsonElement>($"/api/applications/job/{jobId}");
+        var recruiterRow = Assert.Single(jobApplications.GetProperty("items").EnumerateArray());
+        Assert.Equal(83, recruiterRow.GetProperty("score").GetDouble());
+        Assert.Equal("done", recruiterRow.GetProperty("scoreStatus").GetString());
+    }
+
+    [Fact]
     public async Task RecruiterSeesPendingStatus_BeforeTheWorkerRuns()
     {
         var f = NewFactory();
