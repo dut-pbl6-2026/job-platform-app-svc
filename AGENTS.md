@@ -10,7 +10,7 @@ tests/App.Tests          xUnit integration & unit tests
 AppService.sln           mise run build/test
 ```
 
-Dependency: `Api -> Infrastructure -> Core -> SharedKernel` (`PackageReference JobPlatform.SharedKernel 0.3.1` via the GitHub Packages feed in `nuget.config`).
+Dependency: `Api -> Infrastructure -> Core -> SharedKernel` (`PackageReference JobPlatform.SharedKernel 0.4.0` via the GitHub Packages feed in `nuget.config`).
 
 ## SRS Mapping (APP-01)
 - `POST /api/applications` - Candidate applies with CV upload (multipart/form-data: job_id, cover_letter, cv_file). Prevents duplicate application per (job_id, applicant_id) -> 409 Conflict.
