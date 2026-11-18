@@ -12,6 +12,10 @@ public sealed class FakeResumeScoringClient : IResumeScoringClient
 
     public double Score { get; set; } = 72;
 
+    /// <summary>Body the fake reports as the scoring detail; mirrors ai-svc's response shape.</summary>
+    public string DetailJson { get; set; } =
+        """{"overall_score":72,"band":"Good","breakdown":{"skills":{"score":80,"matching":["c#"],"missing":[],"negated":[],"extra":[],"evidence":{}},"semantic":{"score":70,"title_fit":0.8,"top_matches":[]},"experience":{"score":100,"cv_years":4,"required_years":3},"education":{"score":100,"cv_level":"bachelor","required_level":"bachelor"}},"suggestions":[],"warnings":[],"meta":{"parser":"text","pages":1,"language":"en","model":"test","cached":false,"elapsed_ms":1}}""";
+
     /// <summary>Exception thrown by every call while set (a <see cref="ResumeScoringThrottledException"/> or <see cref="ResumeScoringException"/>).</summary>
     public Exception? FailWith { get; set; }
 
@@ -22,7 +26,7 @@ public sealed class FakeResumeScoringClient : IResumeScoringClient
 
     public int CallCount => Calls.Count;
 
-    public async Task<double> ScoreAsync(Stream cvStream, string cvFileName, Guid jobId, CancellationToken cancellationToken = default)
+    public async Task<ResumeScoreResult> ScoreAsync(Stream cvStream, string cvFileName, Guid jobId, CancellationToken cancellationToken = default)
     {
         using var buffer = new MemoryStream();
         await cvStream.CopyToAsync(buffer, cancellationToken);
@@ -32,6 +36,6 @@ public sealed class FakeResumeScoringClient : IResumeScoringClient
 
         if (FailWith is not null)
             throw FailWith;
-        return Score;
+        return new ResumeScoreResult(Score, DetailJson);
     }
 }

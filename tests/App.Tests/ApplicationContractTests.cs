@@ -63,7 +63,9 @@ public class ApplicationContractTests
         var applicant = PropertyNames(typeof(ApplicantApplicationDetailDto));
         var recruiter = PropertyNames(typeof(RecruiterApplicationDetailDto));
 
-        Assert.Equal(recruiter.Where(n => n is not ("RecruiterNotes" or "Score" or "ScoreStatus")), applicant);
+        Assert.Equal(
+            recruiter.Where(n => n is not ("RecruiterNotes" or "Score" or "ScoreStatus" or "ScoreDetail" or "ApplicantName" or "ApplicantEmail")),
+            applicant);
     }
 
     [Fact]
@@ -91,13 +93,16 @@ public class ApplicationContractTests
     }
 
     [Fact]
-    public void RecruiterJson_IncludesRecruiterNotesScoreAndScoreStatus()
+    public void RecruiterJson_IncludesRecruiterNotesScoreScoreStatusAndTheReport()
     {
         var keys = JsonKeys(SampleRecruiterView());
 
         Assert.Contains("recruiterNotes", keys);
         Assert.Contains("score", keys);
         Assert.Contains("scoreStatus", keys);
+        Assert.Contains("scoreDetail", keys);
+        Assert.Contains("applicantName", keys);
+        Assert.Contains("applicantEmail", keys);
     }
 
     [Fact]

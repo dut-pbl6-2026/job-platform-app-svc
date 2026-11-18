@@ -301,6 +301,9 @@ namespace App.Infrastructure.Data.Migrations
                     b.Property<double?>("Score")
                         .HasColumnType("double precision");
 
+                    b.Property<string>("ScoreDetail")
+                        .HasColumnType("text");
+
                     b.Property<DateTime?>("ScoredAt")
                         .HasColumnType("timestamp with time zone");
 

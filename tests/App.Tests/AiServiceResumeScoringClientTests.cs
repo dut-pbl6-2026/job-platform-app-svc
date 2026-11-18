@@ -47,7 +47,7 @@ public class AiServiceResumeScoringClientTests
     private static HttpResponseMessage Json(HttpStatusCode status, string body) =>
         new(status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
 
-    private static async Task<double> ScoreAsync(AiServiceResumeScoringClient client)
+    private static async Task<ResumeScoreResult> ScoreAsync(AiServiceResumeScoringClient client)
     {
         using var cv = new MemoryStream("%PDF-1.4 cv"u8.ToArray());
         return await client.ScoreAsync(cv, "cv.pdf", JobId);
@@ -59,9 +59,11 @@ public class AiServiceResumeScoringClientTests
         var handler = new StubHandler(_ => Task.FromResult(Json(HttpStatusCode.OK, """{"overall_score":81,"band":"good","score_id":"x"}""")));
         var client = Client(handler);
 
-        var score = await ScoreAsync(client);
+        var result = await ScoreAsync(client);
 
-        Assert.Equal(81, score);
+        Assert.Equal(81, result.Score);
+        // The whole response is kept: the recruiter screen reads the breakdown from it.
+        Assert.Contains("\"band\":\"good\"", result.DetailJson);
         Assert.Equal(HttpMethod.Post, handler.Request!.Method);
         Assert.Equal("http://ai:6000/api/ai/score-resume", handler.Request.RequestUri!.ToString());
         Assert.Contains("name=cv_file", handler.RequestBody);

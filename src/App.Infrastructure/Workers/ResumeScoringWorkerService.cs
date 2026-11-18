@@ -213,8 +213,8 @@ public sealed class ResumeScoringWorkerService : BackgroundService
             }
 
             await using var stream = cv.Value.Stream;
-            var score = await _client.ScoreAsync(stream, cv.Value.FileName, application.JobId, ct);
-            job.MarkDone(score, DateTime.UtcNow);
+            var result = await _client.ScoreAsync(stream, cv.Value.FileName, application.JobId, ct);
+            job.MarkDone(result.Score, result.DetailJson, DateTime.UtcNow);
 
             _logger.LogInformation(
                 "ResumeScoringWorkerService: Scored ScoringJobId={ScoringJobId} ApplicationId={ApplicationId}.",

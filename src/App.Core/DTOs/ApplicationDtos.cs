@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using App.Core.Entities;
 
@@ -22,7 +23,10 @@ public record ApplicantApplicationDetailDto(
     IReadOnlyList<string>? NextAllowedStatuses = null
 );
 
-/// <summary>Detail view for recruiters and admins: the applicant view plus internal recruiter notes.</summary>
+/// <summary>
+/// Detail view for recruiters and admins: the applicant view plus internal recruiter notes and, when the
+/// background worker has finished, the whole ai-svc report that produced the score.
+/// </summary>
 public record RecruiterApplicationDetailDto(
     Guid Id,
     Guid JobId,
@@ -36,7 +40,10 @@ public record RecruiterApplicationDetailDto(
     DateTime CreatedAt,
     DateTime UpdatedAt,
     IReadOnlyList<StatusHistoryDto> StatusHistory,
-    IReadOnlyList<string>? NextAllowedStatuses = null
+    IReadOnlyList<string>? NextAllowedStatuses = null,
+    JsonElement? ScoreDetail = null,
+    string? ApplicantName = null,
+    string? ApplicantEmail = null
 );
 
 public record ApplicationSummaryDto(

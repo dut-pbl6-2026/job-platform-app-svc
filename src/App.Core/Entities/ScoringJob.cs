@@ -25,6 +25,12 @@ public class ScoringJob : Entity
     /// <summary>Match score from 0 to 100 (ai-svc <c>overall_score</c>). Set only when <see cref="Status"/> is Done.</summary>
     public double? Score { get; private set; }
 
+    /// <summary>
+    /// The ai-svc response body (JSON): band, component breakdown, matched and missing skills, suggestions.
+    /// Stored verbatim so the recruiter can see how the score was produced without calling ai-svc again.
+    /// </summary>
+    public string? ScoreDetail { get; private set; }
+
     /// <summary>UTC time the score was stored.</summary>
     public DateTime? ScoredAt { get; private set; }
 
@@ -59,13 +65,17 @@ public class ScoringJob : Entity
     public void Release(DateTime now) => NextAttemptAt = now;
 
     /// <summary>Stores the score and ends the job.</summary>
-    public void MarkDone(double score, DateTime now)
+    public void MarkDone(double score, DateTime now) => MarkDone(score, scoreDetail: null, now);
+
+    /// <summary>Completes the job with its score and the JSON report that produced it.</summary>
+    public void MarkDone(double score, string? scoreDetail, DateTime now)
     {
         if (double.IsNaN(score) || double.IsInfinity(score) || score < MinScore || score > MaxScore)
             throw new ArgumentOutOfRangeException(nameof(score), $"Score must be between {MinScore} and {MaxScore}.");
 
         Status = ScoringStatus.Done;
         Score = score;
+        ScoreDetail = string.IsNullOrWhiteSpace(scoreDetail) ? null : scoreDetail;
         ScoredAt = now;
         FailureReason = null;
         Touch();

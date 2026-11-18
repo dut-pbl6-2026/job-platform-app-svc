@@ -36,6 +36,7 @@ Dependency: `Api -> Infrastructure -> Core -> SharedKernel` (`PackageReference J
 - `ResumeScoringWorkerService` claims due rows with `FOR UPDATE SKIP LOCKED` under a 10-minute lease, reads the CV through `IFileStorageService`, and calls ai-svc `POST /api/ai/score-resume` (`cv_file`, `job_id`) with `Authorization: Bearer <AI_SCORING_SERVICE_TOKEN>`, a per-caller token that ai-svc accepts on that route only. The token is read from configuration; no JWT is minted. ai-svc fetches the job description itself.
 - Counted failures back off (30 s, doubling, capped at 15 min); after 8 the row is Failed and logged at Error with its id. Rate limit or busy responses are not counted.
 - Recruiters see `score` and `scoreStatus` (pending, done, failed) on the job list and the detail. Applicants never see either. Applications created before scoring have no row: `scoreStatus` is null.
+- The whole ai-svc response (band, component breakdown, matched/missing skills, suggestions) is stored in `scoring_jobs."ScoreDetail"` and returned by `GET /api/applications/{id}` as `scoreDetail` for recruiters/admins. It is the report the deleted trial-scoring screen used to show; the web renders it on the application page and drops the improvement advice. A row scored before this column existed has no detail; the score still shows.
 
 ## Engagement: templates, email and interviews
 

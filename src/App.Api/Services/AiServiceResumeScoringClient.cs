@@ -36,7 +36,7 @@ public sealed class AiServiceResumeScoringClient : IResumeScoringClient
     public bool Enabled => !string.IsNullOrWhiteSpace(_baseUrl) && !string.IsNullOrWhiteSpace(_token);
 
     /// <inheritdoc />
-    public async Task<double> ScoreAsync(Stream cvStream, string cvFileName, Guid jobId, CancellationToken cancellationToken = default)
+    public async Task<ResumeScoreResult> ScoreAsync(Stream cvStream, string cvFileName, Guid jobId, CancellationToken cancellationToken = default)
     {
         if (!Enabled)
             throw new ResumeScoringException("AI service is not configured.");
@@ -70,8 +70,8 @@ public sealed class AiServiceResumeScoringClient : IResumeScoringClient
                     $"AI service returned HTTP {(int)response.StatusCode} ({code ?? "no error code"}).");
             }
 
-            await using var body = await response.Content.ReadAsStreamAsync(cancellationToken);
-            using var document = await JsonDocument.ParseAsync(body, cancellationToken: cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            using var document = JsonDocument.Parse(body);
 
             if (!document.RootElement.TryGetProperty("overall_score", out var scoreElement)
                 || scoreElement.ValueKind != JsonValueKind.Number
@@ -81,7 +81,7 @@ public sealed class AiServiceResumeScoringClient : IResumeScoringClient
                 throw new ResumeScoringException("AI service response has no valid overall_score.");
             }
 
-            return score;
+            return new ResumeScoreResult(score, body);
         }
         catch (HttpRequestException ex)
         {

@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using App.Api.Services;
 using App.Core.DTOs;
 using App.Core.Entities;
@@ -421,7 +422,10 @@ public static class ApplicationEndpoints
             app.CreatedAt,
             app.UpdatedAt,
             historyDtos,
-            nextAllowed));
+            nextAllowed,
+            ParseDetail(app.ScoringJob?.ScoreDetail),
+            app.ApplicantName,
+            app.ApplicantEmail));
     }
 
     /// <summary>
@@ -794,6 +798,25 @@ public static class ApplicationEndpoints
             result.Value.Stream,
             contentType: result.Value.ContentType,
             fileDownloadName: result.Value.FileName);
+    }
+
+    /// <summary>
+    /// The stored ai-svc response as a JSON value. A row written before the detail column existed (or a
+    /// malformed one) is simply absent: the score still shows, the breakdown is not offered.
+    /// </summary>
+    private static JsonElement? ParseDetail(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return null;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>Wire value of the scoring status (pending, done, failed). Null when the application has no scoring job.</summary>
